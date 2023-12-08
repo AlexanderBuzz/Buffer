@@ -1,0 +1,41 @@
+name: Unit Tests (PHPUnit)
+on: push
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        php-version:
+          - "8.1"
+          - "8.2"
+          - "8.3"
+        deps:
+          - "highest"
+        include:
+          - php-version: "8.1"
+            deps: "lowest"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          tools: composer, phpunit
+          extensions: ds, gmp, sockets
+          coverage: none
+
+      - name: Install composer dependencies
+        uses: ramsey/composer-install@v1
+        with:
+          dependency-versions: ${{ matrix.deps }}
+
+      - name: Run PHPUnit with coverage
+        run: |
+          mkdir -p build/logs
+          vendor/bin/phpunit --fail-on-skipped --coverage-clover build/logs/clover.xml
+        if: ${{ matrix.php-version == env.COVERAGE_PHP_VERSION }}
