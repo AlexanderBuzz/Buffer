@@ -84,8 +84,14 @@ class Buffer implements ArrayAccess
             return $buffer;
         }
 
+        //Buffer from base64 string 'aGVsbG8gd29ybGQ='
+        if (gettype($source) === 'string' && $encoding === 'base64') {
+            $source = base64_decode($source);
+            $encoding ='utf-8';
+        }
+
         //buffer from string 'hello world'
-        if (gettype($source) === 'string' && $encoding == 'utf-8') {
+        if (gettype($source) === 'string' && $encoding === 'utf-8') {
             $tempArray = array_values(unpack('C*', $source));
             $bytesArray = SplFixedArray::fromArray($tempArray);
             $buffer->setBytesArray($bytesArray);
