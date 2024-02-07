@@ -248,7 +248,7 @@ class Buffer implements ArrayAccess
      */
     public function subArray(int $start, ?int $end = null): Buffer
     {
-        if ($end) {
+        if (is_int($end)) {
             $length = $end - $start;
             $tempArray = array_slice($this->bytesArray->toArray(), $start, $length);
         } else {
