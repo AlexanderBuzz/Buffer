@@ -278,8 +278,8 @@ class Buffer implements ArrayAccess
             for ($i = $offset; $i < $end; $i++) {
                 $this->bytesArray[$i] = $byte;
             }
-        } elseif (is_string($value) || $value instanceof Buffer) {
-            $fillBuf = $value instanceof Buffer ? $value : self::from($value, $encoding);
+        } else {
+            $fillBuf = $value instanceof self ? $value : self::from($value, $encoding);
             if ($fillBuf->length === 0) {
                 for ($i = $offset; $i < $end; $i++) {
                     $this->bytesArray[$i] = 0;
@@ -771,7 +771,7 @@ class Buffer implements ArrayAccess
      */
     public function readInt8(int $offset = 0): int
     {
-        $val = $this->bytesArray[$offset];
+        $val = (int)$this->bytesArray[$offset];
         return $val > 127 ? $val - 256 : $val;
     }
 
@@ -794,7 +794,7 @@ class Buffer implements ArrayAccess
      */
     public function readInt16BE(int $offset = 0): int
     {
-        $val = ($this->bytesArray[$offset] << 8) | $this->bytesArray[$offset + 1];
+        $val = ((int)$this->bytesArray[$offset] << 8) | (int)$this->bytesArray[$offset + 1];
         return $val > 32767 ? $val - 65536 : $val;
     }
 
@@ -806,7 +806,7 @@ class Buffer implements ArrayAccess
      */
     public function readInt16LE(int $offset = 0): int
     {
-        $val = ($this->bytesArray[$offset + 1] << 8) | $this->bytesArray[$offset];
+        $val = ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
         return $val > 32767 ? $val - 65536 : $val;
     }
 
@@ -818,7 +818,7 @@ class Buffer implements ArrayAccess
      */
     public function readUInt16BE(int $offset = 0): int
     {
-        return ($this->bytesArray[$offset] << 8) | $this->bytesArray[$offset + 1];
+        return ((int)$this->bytesArray[$offset] << 8) | (int)$this->bytesArray[$offset + 1];
     }
 
     /**
@@ -829,7 +829,7 @@ class Buffer implements ArrayAccess
      */
     public function readUInt16LE(int $offset = 0): int
     {
-        return ($this->bytesArray[$offset + 1] << 8) | $this->bytesArray[$offset];
+        return ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
     }
 
     /**
@@ -840,7 +840,7 @@ class Buffer implements ArrayAccess
      */
     public function readInt32BE(int $offset = 0): int
     {
-        $val = ($this->bytesArray[$offset] << 24) | ($this->bytesArray[$offset + 1] << 16) | ($this->bytesArray[$offset + 2] << 8) | $this->bytesArray[$offset + 3];
+        $val = ((int)$this->bytesArray[$offset] << 24) | ((int)$this->bytesArray[$offset + 1] << 16) | ((int)$this->bytesArray[$offset + 2] << 8) | (int)$this->bytesArray[$offset + 3];
         return $val > 2147483647 ? $val - 4294967296 : $val;
     }
 
@@ -852,7 +852,7 @@ class Buffer implements ArrayAccess
      */
     public function readInt32LE(int $offset = 0): int
     {
-        $val = ($this->bytesArray[$offset + 3] << 24) | ($this->bytesArray[$offset + 2] << 16) | ($this->bytesArray[$offset + 1] << 8) | $this->bytesArray[$offset];
+        $val = ((int)$this->bytesArray[$offset + 3] << 24) | ((int)$this->bytesArray[$offset + 2] << 16) | ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
         return $val > 2147483647 ? $val - 4294967296 : $val;
     }
 
@@ -864,7 +864,7 @@ class Buffer implements ArrayAccess
      */
     public function readUInt32BE(int $offset = 0): int
     {
-        return (($this->bytesArray[$offset] << 24) | ($this->bytesArray[$offset + 1] << 16) | ($this->bytesArray[$offset + 2] << 8) | $this->bytesArray[$offset + 3]) & 0xFFFFFFFF;
+        return (int)(((int)$this->bytesArray[$offset] << 24) | ((int)$this->bytesArray[$offset + 1] << 16) | ((int)$this->bytesArray[$offset + 2] << 8) | (int)$this->bytesArray[$offset + 3]) & 0xFFFFFFFF;
     }
 
     /**
@@ -875,7 +875,7 @@ class Buffer implements ArrayAccess
      */
     public function readUInt32LE(int $offset = 0): int
     {
-        return (($this->bytesArray[$offset + 3] << 24) | ($this->bytesArray[$offset + 2] << 16) | ($this->bytesArray[$offset + 1] << 8) | $this->bytesArray[$offset]) & 0xFFFFFFFF;
+        return (int)(((int)$this->bytesArray[$offset + 3] << 24) | ((int)$this->bytesArray[$offset + 2] << 16) | ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset]) & 0xFFFFFFFF;
     }
 
     /**
