@@ -8,13 +8,12 @@ jobs:
     strategy:
       matrix:
         php-version:
-          - "8.1"
           - "8.2"
           - "8.3"
         deps:
           - "highest"
         include:
-          - php-version: "8.1"
+          - php-version: "8.2"
             deps: "lowest"
 
     steps:
@@ -24,7 +23,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.1'
+          php-version: '8.2'
           tools: composer, phpunit
           extensions: ds, gmp, sockets
           coverage: none
