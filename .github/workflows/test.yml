@@ -10,6 +10,8 @@ jobs:
         php-version:
           - "8.2"
           - "8.3"
+          - "8.4"
+          - "8.5"
         deps:
           - "highest"
         include:
@@ -23,7 +25,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: ${{ matrix.php-version }}
           tools: composer, phpunit
           extensions: ds, gmp, sockets
           coverage: none
