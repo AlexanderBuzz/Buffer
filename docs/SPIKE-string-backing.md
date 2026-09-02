@@ -138,3 +138,34 @@ Der Umbau lohnt sich: **4–7x auf realistischen Codec-Workloads, 4,4x weniger S
 bei drei benannten und in ihrer Wirkung vermessenen Regressionen, von denen keine auf
 Workload-Ebene durchschlägt. Die Voraussetzung bleibt unverändert: Phase 1 zuerst.
 Die Äquivalenz-Matrix aus diesem Spike ist der Anfang davon.
+
+---
+
+## Nachtrag: Verifikation an der echten Klasse (Phase 4)
+
+Der Umbau ist ausgeführt. Gemessen wurde `Buffer` nach Phase 4 gegen die
+Implementierung aus `d2f1491` (Stand nach Phase 3, also inklusive der
+Bugfixes und Grenzprüfungen — der Vergleich isoliert damit wirklich nur die
+Repräsentation).
+
+| Operation | 1.x | 2.0 | Faktor | Spike-Prognose |
+|---|---:|---:|---:|---:|
+| `toUtf8` (256 B) | 416,5 ms | 1,7 ms | **247,1x** | 210,8x |
+| `toString('hex')` (256 B) | 657,8 ms | 16,6 ms | **39,6x** | 50,5x |
+| `toString('hex')` (32 B) | 331,7 ms | 22,9 ms | **14,5x** | 14,9x |
+| `concat` | 166,3 ms | 26,8 ms | **6,2x** | 7,7x |
+| `from(hex)` (32 B) | 361,1 ms | 76,5 ms | **4,7x** | 5,2x |
+| `alloc(32)` | 116,3 ms | 26,6 ms | **4,4x** | 4,7x |
+| `slice(4,20)` | 145,2 ms | 47,6 ms | **3,1x** | 2,7x |
+| `readUInt8` ×32 | 148,3 ms | 156,6 ms | 0,95x | 0,90x |
+| `toArray` (32 B) | 33,3 ms | 147,0 ms | 0,23x | 0,23x |
+| **12-Feld-Transaktion serialisieren** | 701,8 ms | 112,0 ms | **6,3x** | 5,7x |
+
+Speicher: **699,9 KB → 160,7 KB** für 1000 Buffer à 32 Byte, Faktor **4,36x** —
+exakt der Spike-Wert.
+
+Die Prognose hat gehalten. Der Codec-Workload liegt mit 6,3x sogar leicht über
+der vorhergesagten 5,7x, die beiden Regressionen exakt auf den erwarteten
+Werten. Verifiziert durch die 254 Tests aus Phase 1, die den Umbau ohne eine
+einzige Änderung an den Erwartungen überstanden haben — genau der Zweck, zu dem
+sie geschrieben wurden.

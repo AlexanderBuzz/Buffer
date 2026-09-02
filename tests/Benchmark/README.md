@@ -1,18 +1,14 @@
-# Spike: String-Backing (Phase 0/4)
+# Benchmarks
 
-Wegwerf-Messcode zur Entscheidung, ob `SplFixedArray` → `string` als interne
-Repräsentation den Aufwand lohnt. **Kein Teil der Bibliothek** — `BufferStr`
-ist ein Prototyp der heißen Pfade, kein vollständiger Buffer.
+Measures the hot paths of `Buffer` in absolute terms.
 
 ```bash
-php tests/Benchmark/equivalence.php     # Verhaltensgleichheit alt vs. Prototyp
-php tests/Benchmark/bench.php           # Methode für Methode + Speicher
-php tests/Benchmark/bench-workloads.php # realistische Codec-Workloads
+php tests/Benchmark/bench.php            # method by method, plus memory
+php tests/Benchmark/bench-workloads.php  # realistic codec-shaped workloads
 ```
 
-`equivalence.php` ist die Keimzelle der Characterization-Tests aus Phase 1:
-Was hier als "expected divergence" gilt, sind genau die 1.x-Bugs, die Phase 2
-behebt. Ergebnisse siehe `docs/SPIKE-string-backing.md`.
-
-Nach Abschluss von Phase 4 kann `BufferStr.php` entfallen; die Benchmarks
-laufen dann gegen `Buffer` selbst.
+These were written in phase 0 to decide whether the string backing was worth
+building, and kept afterwards as a regression guard. The 1.x comparison that
+justified the change is recorded in `docs/SPIKE-string-backing.md`; the
+throwaway prototype it was measured against is gone, since `Buffer` itself now
+uses that representation.

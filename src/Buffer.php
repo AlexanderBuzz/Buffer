@@ -58,9 +58,16 @@ class Buffer implements ArrayAccess
     private int $length;
 
     /**
-     * @var SplFixedArray
+     * The bytes themselves.
+     *
+     * A PHP string is already a byte array, and a far more compact one than
+     * SplFixedArray, where every byte costs a full zval. Kept private, with
+     * getBytesArray()/setBytesArray() bridging to SplFixedArray for callers
+     * that still expect it.
+     *
+     * @var string
      */
-    private SplFixedArray $bytesArray;
+    private string $bytes;
 
     /**
      * Buffer constructor.
@@ -69,8 +76,23 @@ class Buffer implements ArrayAccess
      */
     public function __construct(int $length = 0)
     {
-        $this->length = $length;
-        $this->bytesArray = new SplFixedArray($length);
+        $this->length = max(0, $length);
+        $this->bytes = str_repeat(chr(self::DEFAULT_FILL), $this->length);
+    }
+
+    /**
+     * Wraps a raw byte string without copying or converting it.
+     *
+     * @param string $raw
+     * @return self
+     */
+    private static function wrap(string $raw): self
+    {
+        $buffer = new self(0);
+        $buffer->bytes = $raw;
+        $buffer->length = strlen($raw);
+
+        return $buffer;
     }
 
     /**
@@ -86,10 +108,6 @@ class Buffer implements ArrayAccess
         $buffer = new self($size);
         if ($size > 0 && $fill !== self::DEFAULT_FILL) {
             $buffer->fill($fill, 0, $size, $encoding);
-        } else {
-            for ($i = 0; $i < $size; $i++) {
-                $buffer->bytesArray[$i] = self::DEFAULT_FILL;
-            }
         }
 
         return $buffer;
@@ -107,21 +125,16 @@ class Buffer implements ArrayAccess
     {
         // Duplicate buffer
         if ($source instanceof Buffer) {
-            $buffer = new self($source->length);
-            for ($i = 0; $i < $source->length; $i++) {
-                $buffer->bytesArray[$i] = $source->bytesArray[$i];
-            }
-            return $buffer;
+            return self::wrap($source->bytes);
         }
 
         // Buffer from byte array [12, 108, 0, 230]
         if (is_array($source)) {
-            $length = count($source);
-            $buffer = new self($length);
-            for ($i = 0; $i < $length; $i++) {
-                $buffer->bytesArray[$i] = (int)$source[$i] & 0xFF;
+            $raw = '';
+            foreach ($source as $byte) {
+                $raw .= chr((int)$byte & 0xFF);
             }
-            return $buffer;
+            return self::wrap($raw);
         }
 
         // Buffer from Bricks/BigInteger
@@ -138,8 +151,7 @@ class Buffer implements ArrayAccess
                 if (strlen($source) % 2) {
                     $source = '0' . $source;
                 }
-                $tempArray = array_map('hexdec', str_split($source, 2));
-                return self::from($tempArray);
+                return self::wrap($source === '' ? '' : (string)hex2bin($source));
             }
 
             if ($encoding === 'base64') {
@@ -148,8 +160,7 @@ class Buffer implements ArrayAccess
             }
 
             // Treat as raw binary string/UTF-8
-            $tempArray = array_values(unpack('C*', $source));
-            return self::from($tempArray);
+            return self::wrap($source);
         }
 
         throw new InvalidArgumentException('Buffer does not support source type: ' . gettype($source));
@@ -178,26 +189,24 @@ class Buffer implements ArrayAccess
             }
         }
 
-        $result = new self($totalLength);
-        for ($i = 0; $i < $totalLength; $i++) {
-            $result->bytesArray[$i] = self::DEFAULT_FILL;
-        }
-
-        $offset = 0;
+        $raw = '';
         foreach ($bufferList as $buffer) {
             if ($buffer instanceof Buffer) {
-                $copyLength = min($buffer->length, $totalLength - $offset);
-                if ($copyLength <= 0) {
+                if (strlen($raw) >= $totalLength) {
                     break;
                 }
-                for ($i = 0; $i < $copyLength; $i++) {
-                    $result->bytesArray[$offset + $i] = $buffer->bytesArray[$i];
-                }
-                $offset += $copyLength;
+                $raw .= $buffer->bytes;
             }
         }
 
-        return $result;
+        // Truncate an overlong result, zero-fill a short one, as Node does.
+        if (strlen($raw) > $totalLength) {
+            $raw = substr($raw, 0, $totalLength);
+        } elseif (strlen($raw) < $totalLength) {
+            $raw = str_pad($raw, $totalLength, chr(self::DEFAULT_FILL));
+        }
+
+        return self::wrap($raw);
     }
 
     /**
@@ -306,23 +315,20 @@ class Buffer implements ArrayAccess
             return $this;
         }
 
+        $span = $end - $offset;
+        if ($span <= 0) {
+            return $this;
+        }
+
         if (is_int($value)) {
-            $byte = $value & 0xFF;
-            for ($i = $offset; $i < $end; $i++) {
-                $this->bytesArray[$i] = $byte;
-            }
+            $pattern = chr($value & 0xFF);
         } else {
             $fillBuf = $value instanceof self ? $value : self::from($value, $encoding);
-            if ($fillBuf->length === 0) {
-                for ($i = $offset; $i < $end; $i++) {
-                    $this->bytesArray[$i] = 0;
-                }
-            } else {
-                for ($i = $offset; $i < $end; $i++) {
-                    $this->bytesArray[$i] = $fillBuf->bytesArray[($i - $offset) % $fillBuf->length];
-                }
-            }
+            $pattern = $fillBuf->length === 0 ? chr(self::DEFAULT_FILL) : $fillBuf->bytes;
         }
+
+        $filled = substr(str_repeat($pattern, intdiv($span, strlen($pattern)) + 1), 0, $span);
+        $this->bytes = substr_replace($this->bytes, $filled, $offset, $span);
 
         return $this;
     }
@@ -346,9 +352,7 @@ class Buffer implements ArrayAccess
             return 0;
         }
 
-        for ($i = 0; $i < $length; $i++) {
-            $this->bytesArray[$offset + $i] = $writeBuf->bytesArray[$i];
-        }
+        $this->bytes = substr_replace($this->bytes, substr($writeBuf->bytes, 0, $length), $offset, $length);
 
         return $length;
     }
@@ -375,15 +379,14 @@ class Buffer implements ArrayAccess
             return 0;
         }
 
-        if ($this === $target && $targetStart > $sourceStart) {
-            for ($i = $copyLength - 1; $i >= 0; $i--) {
-                $target->bytesArray[$targetStart + $i] = $this->bytesArray[$sourceStart + $i];
-            }
-        } else {
-            for ($i = 0; $i < $copyLength; $i++) {
-                $target->bytesArray[$targetStart + $i] = $this->bytesArray[$sourceStart + $i];
-            }
-        }
+        // substr() snapshots the source, so overlapping regions are safe without
+        // the backwards copy the element-wise version needed.
+        $target->bytes = substr_replace(
+            $target->bytes,
+            substr($this->bytes, $sourceStart, $copyLength),
+            $targetStart,
+            $copyLength
+        );
 
         return $copyLength;
     }
@@ -407,12 +410,12 @@ class Buffer implements ArrayAccess
         $tLen = $targetEnd - $targetStart;
         $len = min($sLen, $tLen);
 
-        for ($i = 0; $i < $len; $i++) {
-            $sByte = $this->bytesArray[$sourceStart + $i];
-            $tByte = $target->bytesArray[$targetStart + $i];
-            if ($sByte !== $tByte) {
-                return $sByte < $tByte ? -1 : 1;
-            }
+        $comparison = strcmp(
+            substr($this->bytes, $sourceStart, $len),
+            substr($target->bytes, $targetStart, $len)
+        );
+        if ($comparison !== 0) {
+            return $comparison < 0 ? -1 : 1;
         }
 
         if ($sLen !== $tLen) {
@@ -441,19 +444,8 @@ class Buffer implements ArrayAccess
      */
     public function appendBuffer(Buffer $appendix): void
     {
-        $newLength = $this->length + $appendix->length;
-        $newBytesArray = new SplFixedArray($newLength);
-
-        for ($i = 0; $i < $this->length; $i++) {
-            $newBytesArray[$i] = $this->bytesArray[$i];
-        }
-
-        for ($i = 0; $i < $appendix->length; $i++) {
-            $newBytesArray[$this->length + $i] = $appendix->bytesArray[$i];
-        }
-
-        $this->bytesArray = $newBytesArray;
-        $this->length = $newLength;
+        $this->bytes .= $appendix->bytes;
+        $this->length += $appendix->length;
     }
 
     /**
@@ -476,19 +468,8 @@ class Buffer implements ArrayAccess
      */
     public function prependBuffer(Buffer $prefix): void
     {
-        $newLength = $this->length + $prefix->length;
-        $newBytesArray = new SplFixedArray($newLength);
-
-        for ($i = 0; $i < $prefix->length; $i++) {
-            $newBytesArray[$i] = $prefix->bytesArray[$i];
-        }
-
-        for ($i = 0; $i < $this->length; $i++) {
-            $newBytesArray[$prefix->length + $i] = $this->bytesArray[$i];
-        }
-
-        $this->bytesArray = $newBytesArray;
-        $this->length = $newLength;
+        $this->bytes = $prefix->bytes . $this->bytes;
+        $this->length += $prefix->length;
     }
 
     /**
@@ -516,21 +497,17 @@ class Buffer implements ArrayAccess
         $newLength = max($this->length, $startIdx + $bytesLength);
 
         if ($newLength > $this->length) {
-            $newBytesArray = new SplFixedArray($newLength);
-            for ($i = 0; $i < $this->length; $i++) {
-                $newBytesArray[$i] = $this->bytesArray[$i];
-            }
-            // Fill gaps if any
-            for ($i = $this->length; $i < $startIdx; $i++) {
-                $newBytesArray[$i] = self::DEFAULT_FILL;
-            }
-            $this->bytesArray = $newBytesArray;
+            // Zero-fill any gap between the old end and $startIdx.
+            $this->bytes = str_pad($this->bytes, $newLength, chr(self::DEFAULT_FILL));
             $this->length = $newLength;
         }
 
-        for ($i = 0; $i < $bytesLength; $i++) {
-            $this->bytesArray[$startIdx + $i] = (int)$bytes[$i] & 0xFF;
+        $raw = '';
+        foreach ($bytes as $byte) {
+            $raw .= chr((int)$byte & 0xFF);
         }
+
+        $this->bytes = substr_replace($this->bytes, $raw, $startIdx, $bytesLength);
     }
 
     /**
@@ -554,12 +531,7 @@ class Buffer implements ArrayAccess
         $start = min($start, $this->length);
         $length = max(0, min($end - $start, $this->length - $start));
 
-        $newBuffer = new self($length);
-        for ($i = 0; $i < $length; $i++) {
-            $newBuffer->bytesArray[$i] = $this->bytesArray[$start + $i];
-        }
-
-        return $newBuffer;
+        return self::wrap(substr($this->bytes, $start, $length));
     }
 
     /**
@@ -585,25 +557,19 @@ class Buffer implements ArrayAccess
     public function toString(string $encoding = 'hex', int $start = 0, ?int $end = null): string
     {
         $end ??= $this->length;
-        $buf = ($start === 0 && $end === $this->length) ? $this : $this->subArray($start, $end);
+        $raw = ($start === 0 && $end === $this->length)
+            ? $this->bytes
+            : $this->subArray($start, $end)->bytes;
 
         if ($encoding === 'hex') {
-            $hex = '';
-            for ($i = 0; $i < $buf->length; $i++) {
-                $hex .= str_pad(dechex($buf->bytesArray[$i]), 2, '0', STR_PAD_LEFT);
-            }
-            return strtoupper($hex);
+            return strtoupper(bin2hex($raw));
         }
 
         if ($encoding === 'base64') {
-            return base64_encode($buf->toUtf8());
+            return base64_encode($raw);
         }
 
-        if ($encoding === 'utf8' || $encoding === 'utf-8') {
-            return $buf->toUtf8();
-        }
-
-        return $buf->toUtf8();
+        return $raw;
     }
 
     /**
@@ -613,7 +579,11 @@ class Buffer implements ArrayAccess
      */
     public function toArray(): array
     {
-        return $this->bytesArray->toArray();
+        if ($this->length === 0) {
+            return [];
+        }
+
+        return array_values(unpack('C*', $this->bytes));
     }
 
     /**
@@ -659,11 +629,7 @@ class Buffer implements ArrayAccess
      */
     public function toUtf8(): string
     {
-        $chars = '';
-        for ($i = 0; $i < $this->length; $i++) {
-            $chars .= chr($this->bytesArray[$i]);
-        }
-        return $chars;
+        return $this->bytes;
     }
 
     /**
@@ -678,11 +644,11 @@ class Buffer implements ArrayAccess
             throw new Exception('Buffer size must be a multiple of 16-bits');
         }
 
-        for ($i = 0; $i < $this->length; $i += 2) {
-            $tmp = $this->bytesArray[$i];
-            $this->bytesArray[$i] = $this->bytesArray[$i + 1];
-            $this->bytesArray[$i + 1] = $tmp;
-        }
+        $this->bytes = (string)preg_replace_callback(
+            '/../s',
+            static fn (array $m): string => strrev($m[0]),
+            $this->bytes
+        );
 
         return $this;
     }
@@ -699,14 +665,11 @@ class Buffer implements ArrayAccess
             throw new Exception('Buffer size must be a multiple of 32-bits');
         }
 
-        for ($i = 0; $i < $this->length; $i += 4) {
-            $tmp0 = $this->bytesArray[$i];
-            $tmp1 = $this->bytesArray[$i + 1];
-            $this->bytesArray[$i] = $this->bytesArray[$i + 3];
-            $this->bytesArray[$i + 1] = $this->bytesArray[$i + 2];
-            $this->bytesArray[$i + 2] = $tmp1;
-            $this->bytesArray[$i + 3] = $tmp0;
-        }
+        $this->bytes = (string)preg_replace_callback(
+            '/..../s',
+            static fn (array $m): string => strrev($m[0]),
+            $this->bytes
+        );
 
         return $this;
     }
@@ -723,13 +686,11 @@ class Buffer implements ArrayAccess
             throw new Exception('Buffer size must be a multiple of 64-bits');
         }
 
-        for ($i = 0; $i < $this->length; $i += 8) {
-            for ($j = 0; $j < 4; $j++) {
-                $tmp = $this->bytesArray[$i + $j];
-                $this->bytesArray[$i + $j] = $this->bytesArray[$i + 7 - $j];
-                $this->bytesArray[$i + 7 - $j] = $tmp;
-            }
-        }
+        $this->bytes = (string)preg_replace_callback(
+            '/......../s',
+            static fn (array $m): string => strrev($m[0]),
+            $this->bytes
+        );
 
         return $this;
     }
@@ -749,20 +710,13 @@ class Buffer implements ArrayAccess
             return -1;
         }
 
-        for ($i = $byteOffset; $i <= $this->length - $valBuf->length; $i++) {
-            $match = true;
-            for ($j = 0; $j < $valBuf->length; $j++) {
-                if ($this->bytesArray[$i + $j] !== $valBuf->bytesArray[$j]) {
-                    $match = false;
-                    break;
-                }
-            }
-            if ($match) {
-                return $i;
-            }
+        if ($byteOffset > $this->length - $valBuf->length) {
+            return -1;
         }
 
-        return -1;
+        $position = strpos($this->bytes, $valBuf->bytes, max(0, $byteOffset));
+
+        return $position === false ? -1 : $position;
     }
 
     /**
@@ -796,20 +750,15 @@ class Buffer implements ArrayAccess
         $byteOffset ??= $this->length - $valBuf->length;
         $byteOffset = min($byteOffset, $this->length - $valBuf->length);
 
-        for ($i = $byteOffset; $i >= 0; $i--) {
-            $match = true;
-            for ($j = 0; $j < $valBuf->length; $j++) {
-                if ($this->bytesArray[$i + $j] !== $valBuf->bytesArray[$j]) {
-                    $match = false;
-                    break;
-                }
-            }
-            if ($match) {
-                return $i;
-            }
+        if ($byteOffset < 0) {
+            return -1;
         }
 
-        return -1;
+        // Search only the window that could still start at or before $byteOffset.
+        $haystack = substr($this->bytes, 0, $byteOffset + $valBuf->length);
+        $position = strrpos($haystack, $valBuf->bytes);
+
+        return $position === false ? -1 : $position;
     }
 
     /**
@@ -822,7 +771,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readInt8', $offset, 1);
 
-        $val = (int)$this->bytesArray[$offset];
+        $val = ord($this->bytes[$offset]);
         return $val > 127 ? $val - 256 : $val;
     }
 
@@ -836,7 +785,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readUInt8', $offset, 1);
 
-        return $this->bytesArray[$offset];
+        return ord($this->bytes[$offset]);
     }
 
     /**
@@ -849,7 +798,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readInt16BE', $offset, 2);
 
-        $val = ((int)$this->bytesArray[$offset] << 8) | (int)$this->bytesArray[$offset + 1];
+        $val = (ord($this->bytes[$offset]) << 8) | ord($this->bytes[$offset + 1]);
         return $val > 32767 ? $val - 65536 : $val;
     }
 
@@ -863,7 +812,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readInt16LE', $offset, 2);
 
-        $val = ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
+        $val = (ord($this->bytes[$offset + 1]) << 8) | ord($this->bytes[$offset]);
         return $val > 32767 ? $val - 65536 : $val;
     }
 
@@ -877,7 +826,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readUInt16BE', $offset, 2);
 
-        return ((int)$this->bytesArray[$offset] << 8) | (int)$this->bytesArray[$offset + 1];
+        return (ord($this->bytes[$offset]) << 8) | ord($this->bytes[$offset + 1]);
     }
 
     /**
@@ -890,7 +839,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readUInt16LE', $offset, 2);
 
-        return ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
+        return (ord($this->bytes[$offset + 1]) << 8) | ord($this->bytes[$offset]);
     }
 
     /**
@@ -903,7 +852,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readInt32BE', $offset, 4);
 
-        $val = ((int)$this->bytesArray[$offset] << 24) | ((int)$this->bytesArray[$offset + 1] << 16) | ((int)$this->bytesArray[$offset + 2] << 8) | (int)$this->bytesArray[$offset + 3];
+        $val = (ord($this->bytes[$offset]) << 24) | (ord($this->bytes[$offset + 1]) << 16) | (ord($this->bytes[$offset + 2]) << 8) | ord($this->bytes[$offset + 3]);
         return $val > 2147483647 ? $val - 4294967296 : $val;
     }
 
@@ -917,7 +866,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readInt32LE', $offset, 4);
 
-        $val = ((int)$this->bytesArray[$offset + 3] << 24) | ((int)$this->bytesArray[$offset + 2] << 16) | ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
+        $val = (ord($this->bytes[$offset + 3]) << 24) | (ord($this->bytes[$offset + 2]) << 16) | (ord($this->bytes[$offset + 1]) << 8) | ord($this->bytes[$offset]);
         return $val > 2147483647 ? $val - 4294967296 : $val;
     }
 
@@ -931,7 +880,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readUInt32BE', $offset, 4);
 
-        return (int)(((int)$this->bytesArray[$offset] << 24) | ((int)$this->bytesArray[$offset + 1] << 16) | ((int)$this->bytesArray[$offset + 2] << 8) | (int)$this->bytesArray[$offset + 3]) & 0xFFFFFFFF;
+        return ((ord($this->bytes[$offset]) << 24) | (ord($this->bytes[$offset + 1]) << 16) | (ord($this->bytes[$offset + 2]) << 8) | ord($this->bytes[$offset + 3])) & 0xFFFFFFFF;
     }
 
     /**
@@ -944,7 +893,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readUInt32LE', $offset, 4);
 
-        return (int)(((int)$this->bytesArray[$offset + 3] << 24) | ((int)$this->bytesArray[$offset + 2] << 16) | ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset]) & 0xFFFFFFFF;
+        return ((ord($this->bytes[$offset + 3]) << 24) | (ord($this->bytes[$offset + 2]) << 16) | (ord($this->bytes[$offset + 1]) << 8) | ord($this->bytes[$offset])) & 0xFFFFFFFF;
     }
 
     /**
@@ -958,7 +907,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeInt8', $offset, 1);
 
-        $this->bytesArray[$offset] = $value & 0xFF;
+        $this->bytes[$offset] = chr($value & 0xFF);
         return $offset + 1;
     }
 
@@ -973,7 +922,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeUInt8', $offset, 1);
 
-        $this->bytesArray[$offset] = $value & 0xFF;
+        $this->bytes[$offset] = chr($value & 0xFF);
         return $offset + 1;
     }
 
@@ -988,8 +937,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeInt16BE', $offset, 2);
 
-        $this->bytesArray[$offset] = ($value >> 8) & 0xFF;
-        $this->bytesArray[$offset + 1] = $value & 0xFF;
+        $this->bytes[$offset] = chr(($value >> 8) & 0xFF);
+        $this->bytes[$offset + 1] = chr($value & 0xFF);
         return $offset + 2;
     }
 
@@ -1004,8 +953,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeInt16LE', $offset, 2);
 
-        $this->bytesArray[$offset] = $value & 0xFF;
-        $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
+        $this->bytes[$offset] = chr($value & 0xFF);
+        $this->bytes[$offset + 1] = chr(($value >> 8) & 0xFF);
         return $offset + 2;
     }
 
@@ -1020,8 +969,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeUInt16BE', $offset, 2);
 
-        $this->bytesArray[$offset] = ($value >> 8) & 0xFF;
-        $this->bytesArray[$offset + 1] = $value & 0xFF;
+        $this->bytes[$offset] = chr(($value >> 8) & 0xFF);
+        $this->bytes[$offset + 1] = chr($value & 0xFF);
         return $offset + 2;
     }
 
@@ -1036,8 +985,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeUInt16LE', $offset, 2);
 
-        $this->bytesArray[$offset] = $value & 0xFF;
-        $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
+        $this->bytes[$offset] = chr($value & 0xFF);
+        $this->bytes[$offset + 1] = chr(($value >> 8) & 0xFF);
         return $offset + 2;
     }
 
@@ -1052,10 +1001,10 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeInt32BE', $offset, 4);
 
-        $this->bytesArray[$offset] = ($value >> 24) & 0xFF;
-        $this->bytesArray[$offset + 1] = ($value >> 16) & 0xFF;
-        $this->bytesArray[$offset + 2] = ($value >> 8) & 0xFF;
-        $this->bytesArray[$offset + 3] = $value & 0xFF;
+        $this->bytes[$offset] = chr(($value >> 24) & 0xFF);
+        $this->bytes[$offset + 1] = chr(($value >> 16) & 0xFF);
+        $this->bytes[$offset + 2] = chr(($value >> 8) & 0xFF);
+        $this->bytes[$offset + 3] = chr($value & 0xFF);
         return $offset + 4;
     }
 
@@ -1070,10 +1019,10 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeInt32LE', $offset, 4);
 
-        $this->bytesArray[$offset] = $value & 0xFF;
-        $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
-        $this->bytesArray[$offset + 2] = ($value >> 16) & 0xFF;
-        $this->bytesArray[$offset + 3] = ($value >> 24) & 0xFF;
+        $this->bytes[$offset] = chr($value & 0xFF);
+        $this->bytes[$offset + 1] = chr(($value >> 8) & 0xFF);
+        $this->bytes[$offset + 2] = chr(($value >> 16) & 0xFF);
+        $this->bytes[$offset + 3] = chr(($value >> 24) & 0xFF);
         return $offset + 4;
     }
 
@@ -1088,10 +1037,10 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeUInt32BE', $offset, 4);
 
-        $this->bytesArray[$offset] = ($value >> 24) & 0xFF;
-        $this->bytesArray[$offset + 1] = ($value >> 16) & 0xFF;
-        $this->bytesArray[$offset + 2] = ($value >> 8) & 0xFF;
-        $this->bytesArray[$offset + 3] = $value & 0xFF;
+        $this->bytes[$offset] = chr(($value >> 24) & 0xFF);
+        $this->bytes[$offset + 1] = chr(($value >> 16) & 0xFF);
+        $this->bytes[$offset + 2] = chr(($value >> 8) & 0xFF);
+        $this->bytes[$offset + 3] = chr($value & 0xFF);
         return $offset + 4;
     }
 
@@ -1106,10 +1055,10 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeUInt32LE', $offset, 4);
 
-        $this->bytesArray[$offset] = $value & 0xFF;
-        $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
-        $this->bytesArray[$offset + 2] = ($value >> 16) & 0xFF;
-        $this->bytesArray[$offset + 3] = ($value >> 24) & 0xFF;
+        $this->bytes[$offset] = chr($value & 0xFF);
+        $this->bytes[$offset + 1] = chr(($value >> 8) & 0xFF);
+        $this->bytes[$offset + 2] = chr(($value >> 16) & 0xFF);
+        $this->bytes[$offset + 3] = chr(($value >> 24) & 0xFF);
         return $offset + 4;
     }
 
@@ -1123,8 +1072,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readFloatBE', $offset, 4);
 
-        $data = pack('CCCC', $this->bytesArray[$offset], $this->bytesArray[$offset + 1], $this->bytesArray[$offset + 2], $this->bytesArray[$offset + 3]);
-        return unpack('f', strrev($data))[1];
+        return unpack('f', strrev(substr($this->bytes, $offset, 4)))[1];
     }
 
     /**
@@ -1137,8 +1085,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readFloatLE', $offset, 4);
 
-        $data = pack('CCCC', $this->bytesArray[$offset], $this->bytesArray[$offset + 1], $this->bytesArray[$offset + 2], $this->bytesArray[$offset + 3]);
-        return unpack('f', $data)[1];
+        return unpack('f', substr($this->bytes, $offset, 4))[1];
     }
 
     /**
@@ -1151,11 +1098,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readDoubleBE', $offset, 8);
 
-        $data = '';
-        for ($i = 0; $i < 8; $i++) {
-            $data .= chr($this->bytesArray[$offset + $i]);
-        }
-        return unpack('d', strrev($data))[1];
+        return unpack('d', strrev(substr($this->bytes, $offset, 8)))[1];
     }
 
     /**
@@ -1168,11 +1111,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readDoubleLE', $offset, 8);
 
-        $data = '';
-        for ($i = 0; $i < 8; $i++) {
-            $data .= chr($this->bytesArray[$offset + $i]);
-        }
-        return unpack('d', $data)[1];
+        return unpack('d', substr($this->bytes, $offset, 8))[1];
     }
 
     /**
@@ -1186,10 +1125,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeFloatBE', $offset, 4);
 
-        $data = strrev(pack('f', $value));
-        for ($i = 0; $i < 4; $i++) {
-            $this->bytesArray[$offset + $i] = ord($data[$i]);
-        }
+        $this->bytes = substr_replace($this->bytes, strrev(pack('f', $value)), $offset, 4);
+
         return $offset + 4;
     }
 
@@ -1204,10 +1141,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeFloatLE', $offset, 4);
 
-        $data = pack('f', $value);
-        for ($i = 0; $i < 4; $i++) {
-            $this->bytesArray[$offset + $i] = ord($data[$i]);
-        }
+        $this->bytes = substr_replace($this->bytes, pack('f', $value), $offset, 4);
+
         return $offset + 4;
     }
 
@@ -1222,10 +1157,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeDoubleBE', $offset, 8);
 
-        $data = strrev(pack('d', $value));
-        for ($i = 0; $i < 8; $i++) {
-            $this->bytesArray[$offset + $i] = ord($data[$i]);
-        }
+        $this->bytes = substr_replace($this->bytes, strrev(pack('d', $value)), $offset, 8);
+
         return $offset + 8;
     }
 
@@ -1240,10 +1173,8 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('writeDoubleLE', $offset, 8);
 
-        $data = pack('d', $value);
-        for ($i = 0; $i < 8; $i++) {
-            $this->bytesArray[$offset + $i] = ord($data[$i]);
-        }
+        $this->bytes = substr_replace($this->bytes, pack('d', $value), $offset, 8);
+
         return $offset + 8;
     }
 
@@ -1258,25 +1189,37 @@ class Buffer implements ArrayAccess
     }
 
     /**
-     * Returns the internal SplFixedArray.
+     * Returns the buffer content as an SplFixedArray of integers.
+     *
+     * Kept for backwards compatibility. The bytes are held as a string
+     * internally, so this converts on the fly rather than exposing the storage.
+     * toArray() is cheaper and getLength() answers the usual reason for calling
+     * this.
      *
      * @return SplFixedArray
      */
     public function getBytesArray(): SplFixedArray
     {
-        return $this->bytesArray;
+        return SplFixedArray::fromArray($this->toArray());
     }
 
     /**
-     * Sets the internal SplFixedArray.
+     * Replaces the buffer content from an SplFixedArray of integers.
+     *
+     * Kept for backwards compatibility, see getBytesArray().
      *
      * @param SplFixedArray $bytesArray
      * @return void
      */
     public function setBytesArray(SplFixedArray $bytesArray): void
     {
-        $this->bytesArray = $bytesArray;
-        $this->length = $bytesArray->getSize();
+        $raw = '';
+        foreach ($bytesArray as $byte) {
+            $raw .= chr((int)$byte & 0xFF);
+        }
+
+        $this->bytes = $raw;
+        $this->length = strlen($raw);
     }
 
     /**
@@ -1287,7 +1230,7 @@ class Buffer implements ArrayAccess
      */
     public function offsetExists(mixed $offset): bool
     {
-        return isset($this->bytesArray[$offset]);
+        return is_int($offset) && $offset >= 0 && $offset < $this->length;
     }
 
     /**
@@ -1303,7 +1246,7 @@ class Buffer implements ArrayAccess
             throw OutOfBoundsException::forRange('offsetGet', is_int($offset) ? $offset : 0, 1, $this->length);
         }
 
-        return $this->bytesArray[$offset];
+        return ord($this->bytes[$offset]);
     }
 
     /**
@@ -1323,7 +1266,7 @@ class Buffer implements ArrayAccess
             return;
         }
 
-        $this->bytesArray[$offset] = (int)$value & 0xFF;
+        $this->bytes[$offset] = chr((int)$value & 0xFF);
     }
 
     /**
