@@ -127,9 +127,10 @@ final class BufferExtendedTest extends TestCase
         $this->assertEquals(10, $buf[0]);
         $this->assertEquals(20, $buf[1]);
         
-        $buf[10] = 100; // should expand
-        $this->assertEquals(11, $buf->length);
-        $this->assertEquals(100, $buf[10]);
-        $this->assertEquals(0, $buf[5]);
+        // Buffers are fixed size, as in Node: a write past the end is a no-op.
+        // See NodeParityTest::testOffsetSetPastTheEndIsANoOp.
+        $buf[10] = 100;
+        $this->assertEquals(5, $buf->getLength());
+        $this->assertEquals('0A14000000', $buf->toString('hex'));
     }
 }

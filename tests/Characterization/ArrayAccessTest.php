@@ -4,6 +4,7 @@ namespace Hardcastle\Buffer\Test\Characterization;
 
 use Exception;
 use Hardcastle\Buffer\Buffer;
+use Hardcastle\Buffer\Exception\OutOfBoundsException;
 use PHPUnit\Framework\TestCase;
 use SplFixedArray;
 
@@ -23,8 +24,16 @@ final class ArrayAccessTest extends TestCase
 
     public function testOffsetGetOutOfBoundsThrows(): void
     {
+        $this->expectException(OutOfBoundsException::class);
+        $this->expectExceptionMessage('offsetGet at offset 2 needs 1 byte(s), but the buffer is 2 byte(s) long.');
+
+        $buf = Buffer::from('AABB', 'hex');
+        $buf[2];
+    }
+
+    public function testOffsetGetOutOfBoundsStaysCatchableAsException(): void
+    {
         $this->expectException(Exception::class);
-        $this->expectExceptionMessage('Requested Buffer element out of bounds');
 
         $buf = Buffer::from('AABB', 'hex');
         $buf[2];

@@ -13,6 +13,9 @@ namespace Hardcastle\Buffer;
 use ArrayAccess;
 use Brick\Math\BigInteger;
 use Exception;
+use Hardcastle\Buffer\Exception\InvalidArgumentException;
+use Hardcastle\Buffer\Exception\OutOfBoundsException;
+use Hardcastle\Buffer\Exception\OverflowException;
 use SplFixedArray;
 
 /**
@@ -22,6 +25,26 @@ use SplFixedArray;
 class Buffer implements ArrayAccess
 {
     public const DEFAULT_FILL = 0x00;
+
+    /**
+     * Guards an accessor against reading or writing outside the buffer.
+     *
+     * SplFixedArray would throw its own generic exception here, and a string
+     * backed buffer would not throw at all, so the check is explicit and the
+     * exception uniform across every accessor.
+     *
+     * @param string $operation
+     * @param int $offset
+     * @param int $size
+     * @return void
+     * @throws OutOfBoundsException
+     */
+    private function assertRange(string $operation, int $offset, int $size): void
+    {
+        if ($offset < 0 || $offset + $size > $this->length) {
+            throw OutOfBoundsException::forRange($operation, $offset, $size, $this->length);
+        }
+    }
 
     /**
      * @var int
@@ -123,7 +146,7 @@ class Buffer implements ArrayAccess
             return self::from($tempArray);
         }
 
-        throw new Exception('Buffer does not support source type: ' . gettype($source));
+        throw new InvalidArgumentException('Buffer does not support source type: ' . gettype($source));
     }
 
     /**
@@ -150,6 +173,10 @@ class Buffer implements ArrayAccess
         }
 
         $result = new self($totalLength);
+        for ($i = 0; $i < $totalLength; $i++) {
+            $result->bytesArray[$i] = self::DEFAULT_FILL;
+        }
+
         $offset = 0;
         foreach ($bufferList as $buffer) {
             if ($buffer instanceof Buffer) {
@@ -518,8 +545,8 @@ class Buffer implements ArrayAccess
             $end = max(0, $this->length + $end);
         }
 
-        $length = max(0, $end - $start);
-        $length = min($length, $this->length - $start);
+        $start = min($start, $this->length);
+        $length = max(0, min($end - $start, $this->length - $start));
 
         $newBuffer = new self($length);
         for ($i = 0; $i < $length; $i++) {
@@ -584,12 +611,28 @@ class Buffer implements ArrayAccess
     }
 
     /**
-     * Returns the buffer content as big integer.
+     * Returns the buffer content as an integer.
+     *
+     * Limited to 8 bytes, because anything wider cannot be represented by a PHP
+     * int. Use toDecimalString() or readBigUInt64BE() for larger values.
      *
      * @return int
+     * @throws OverflowException If the buffer is longer than 8 bytes.
      */
     public function toInt(): int
     {
+        if ($this->length > 8) {
+            throw new OverflowException(sprintf(
+                'Cannot convert a %d byte buffer to int without loss; the limit is 8 bytes. '
+                . 'Use toDecimalString() or readBigUInt64BE() instead.',
+                $this->length
+            ));
+        }
+
+        if ($this->length === 0) {
+            return 0;
+        }
+
         return (int)BigInteger::fromBase($this->toString('hex'), 16)->toBase(10);
     }
 
@@ -771,6 +814,8 @@ class Buffer implements ArrayAccess
      */
     public function readInt8(int $offset = 0): int
     {
+        $this->assertRange('readInt8', $offset, 1);
+
         $val = (int)$this->bytesArray[$offset];
         return $val > 127 ? $val - 256 : $val;
     }
@@ -783,6 +828,8 @@ class Buffer implements ArrayAccess
      */
     public function readUInt8(int $offset = 0): int
     {
+        $this->assertRange('readUInt8', $offset, 1);
+
         return $this->bytesArray[$offset];
     }
 
@@ -794,6 +841,8 @@ class Buffer implements ArrayAccess
      */
     public function readInt16BE(int $offset = 0): int
     {
+        $this->assertRange('readInt16BE', $offset, 2);
+
         $val = ((int)$this->bytesArray[$offset] << 8) | (int)$this->bytesArray[$offset + 1];
         return $val > 32767 ? $val - 65536 : $val;
     }
@@ -806,6 +855,8 @@ class Buffer implements ArrayAccess
      */
     public function readInt16LE(int $offset = 0): int
     {
+        $this->assertRange('readInt16LE', $offset, 2);
+
         $val = ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
         return $val > 32767 ? $val - 65536 : $val;
     }
@@ -818,6 +869,8 @@ class Buffer implements ArrayAccess
      */
     public function readUInt16BE(int $offset = 0): int
     {
+        $this->assertRange('readUInt16BE', $offset, 2);
+
         return ((int)$this->bytesArray[$offset] << 8) | (int)$this->bytesArray[$offset + 1];
     }
 
@@ -829,6 +882,8 @@ class Buffer implements ArrayAccess
      */
     public function readUInt16LE(int $offset = 0): int
     {
+        $this->assertRange('readUInt16LE', $offset, 2);
+
         return ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
     }
 
@@ -840,6 +895,8 @@ class Buffer implements ArrayAccess
      */
     public function readInt32BE(int $offset = 0): int
     {
+        $this->assertRange('readInt32BE', $offset, 4);
+
         $val = ((int)$this->bytesArray[$offset] << 24) | ((int)$this->bytesArray[$offset + 1] << 16) | ((int)$this->bytesArray[$offset + 2] << 8) | (int)$this->bytesArray[$offset + 3];
         return $val > 2147483647 ? $val - 4294967296 : $val;
     }
@@ -852,6 +909,8 @@ class Buffer implements ArrayAccess
      */
     public function readInt32LE(int $offset = 0): int
     {
+        $this->assertRange('readInt32LE', $offset, 4);
+
         $val = ((int)$this->bytesArray[$offset + 3] << 24) | ((int)$this->bytesArray[$offset + 2] << 16) | ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset];
         return $val > 2147483647 ? $val - 4294967296 : $val;
     }
@@ -864,6 +923,8 @@ class Buffer implements ArrayAccess
      */
     public function readUInt32BE(int $offset = 0): int
     {
+        $this->assertRange('readUInt32BE', $offset, 4);
+
         return (int)(((int)$this->bytesArray[$offset] << 24) | ((int)$this->bytesArray[$offset + 1] << 16) | ((int)$this->bytesArray[$offset + 2] << 8) | (int)$this->bytesArray[$offset + 3]) & 0xFFFFFFFF;
     }
 
@@ -875,6 +936,8 @@ class Buffer implements ArrayAccess
      */
     public function readUInt32LE(int $offset = 0): int
     {
+        $this->assertRange('readUInt32LE', $offset, 4);
+
         return (int)(((int)$this->bytesArray[$offset + 3] << 24) | ((int)$this->bytesArray[$offset + 2] << 16) | ((int)$this->bytesArray[$offset + 1] << 8) | (int)$this->bytesArray[$offset]) & 0xFFFFFFFF;
     }
 
@@ -887,6 +950,8 @@ class Buffer implements ArrayAccess
      */
     public function writeInt8(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeInt8', $offset, 1);
+
         $this->bytesArray[$offset] = $value & 0xFF;
         return $offset + 1;
     }
@@ -900,6 +965,8 @@ class Buffer implements ArrayAccess
      */
     public function writeUInt8(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeUInt8', $offset, 1);
+
         $this->bytesArray[$offset] = $value & 0xFF;
         return $offset + 1;
     }
@@ -913,6 +980,8 @@ class Buffer implements ArrayAccess
      */
     public function writeInt16BE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeInt16BE', $offset, 2);
+
         $this->bytesArray[$offset] = ($value >> 8) & 0xFF;
         $this->bytesArray[$offset + 1] = $value & 0xFF;
         return $offset + 2;
@@ -927,6 +996,8 @@ class Buffer implements ArrayAccess
      */
     public function writeInt16LE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeInt16LE', $offset, 2);
+
         $this->bytesArray[$offset] = $value & 0xFF;
         $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
         return $offset + 2;
@@ -941,6 +1012,8 @@ class Buffer implements ArrayAccess
      */
     public function writeUInt16BE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeUInt16BE', $offset, 2);
+
         $this->bytesArray[$offset] = ($value >> 8) & 0xFF;
         $this->bytesArray[$offset + 1] = $value & 0xFF;
         return $offset + 2;
@@ -955,6 +1028,8 @@ class Buffer implements ArrayAccess
      */
     public function writeUInt16LE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeUInt16LE', $offset, 2);
+
         $this->bytesArray[$offset] = $value & 0xFF;
         $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
         return $offset + 2;
@@ -969,6 +1044,8 @@ class Buffer implements ArrayAccess
      */
     public function writeInt32BE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeInt32BE', $offset, 4);
+
         $this->bytesArray[$offset] = ($value >> 24) & 0xFF;
         $this->bytesArray[$offset + 1] = ($value >> 16) & 0xFF;
         $this->bytesArray[$offset + 2] = ($value >> 8) & 0xFF;
@@ -985,6 +1062,8 @@ class Buffer implements ArrayAccess
      */
     public function writeInt32LE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeInt32LE', $offset, 4);
+
         $this->bytesArray[$offset] = $value & 0xFF;
         $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
         $this->bytesArray[$offset + 2] = ($value >> 16) & 0xFF;
@@ -1001,6 +1080,8 @@ class Buffer implements ArrayAccess
      */
     public function writeUInt32BE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeUInt32BE', $offset, 4);
+
         $this->bytesArray[$offset] = ($value >> 24) & 0xFF;
         $this->bytesArray[$offset + 1] = ($value >> 16) & 0xFF;
         $this->bytesArray[$offset + 2] = ($value >> 8) & 0xFF;
@@ -1017,6 +1098,8 @@ class Buffer implements ArrayAccess
      */
     public function writeUInt32LE(int $value, int $offset = 0): int
     {
+        $this->assertRange('writeUInt32LE', $offset, 4);
+
         $this->bytesArray[$offset] = $value & 0xFF;
         $this->bytesArray[$offset + 1] = ($value >> 8) & 0xFF;
         $this->bytesArray[$offset + 2] = ($value >> 16) & 0xFF;
@@ -1032,6 +1115,8 @@ class Buffer implements ArrayAccess
      */
     public function readFloatBE(int $offset = 0): float
     {
+        $this->assertRange('readFloatBE', $offset, 4);
+
         $data = pack('CCCC', $this->bytesArray[$offset], $this->bytesArray[$offset + 1], $this->bytesArray[$offset + 2], $this->bytesArray[$offset + 3]);
         return unpack('f', strrev($data))[1];
     }
@@ -1044,6 +1129,8 @@ class Buffer implements ArrayAccess
      */
     public function readFloatLE(int $offset = 0): float
     {
+        $this->assertRange('readFloatLE', $offset, 4);
+
         $data = pack('CCCC', $this->bytesArray[$offset], $this->bytesArray[$offset + 1], $this->bytesArray[$offset + 2], $this->bytesArray[$offset + 3]);
         return unpack('f', $data)[1];
     }
@@ -1056,6 +1143,8 @@ class Buffer implements ArrayAccess
      */
     public function readDoubleBE(int $offset = 0): float
     {
+        $this->assertRange('readDoubleBE', $offset, 8);
+
         $data = '';
         for ($i = 0; $i < 8; $i++) {
             $data .= chr($this->bytesArray[$offset + $i]);
@@ -1071,6 +1160,8 @@ class Buffer implements ArrayAccess
      */
     public function readDoubleLE(int $offset = 0): float
     {
+        $this->assertRange('readDoubleLE', $offset, 8);
+
         $data = '';
         for ($i = 0; $i < 8; $i++) {
             $data .= chr($this->bytesArray[$offset + $i]);
@@ -1087,6 +1178,8 @@ class Buffer implements ArrayAccess
      */
     public function writeFloatBE(float $value, int $offset = 0): int
     {
+        $this->assertRange('writeFloatBE', $offset, 4);
+
         $data = strrev(pack('f', $value));
         for ($i = 0; $i < 4; $i++) {
             $this->bytesArray[$offset + $i] = ord($data[$i]);
@@ -1103,6 +1196,8 @@ class Buffer implements ArrayAccess
      */
     public function writeFloatLE(float $value, int $offset = 0): int
     {
+        $this->assertRange('writeFloatLE', $offset, 4);
+
         $data = pack('f', $value);
         for ($i = 0; $i < 4; $i++) {
             $this->bytesArray[$offset + $i] = ord($data[$i]);
@@ -1119,6 +1214,8 @@ class Buffer implements ArrayAccess
      */
     public function writeDoubleBE(float $value, int $offset = 0): int
     {
+        $this->assertRange('writeDoubleBE', $offset, 8);
+
         $data = strrev(pack('d', $value));
         for ($i = 0; $i < 8; $i++) {
             $this->bytesArray[$offset + $i] = ord($data[$i]);
@@ -1135,6 +1232,8 @@ class Buffer implements ArrayAccess
      */
     public function writeDoubleLE(float $value, int $offset = 0): int
     {
+        $this->assertRange('writeDoubleLE', $offset, 8);
+
         $data = pack('d', $value);
         for ($i = 0; $i < 8; $i++) {
             $this->bytesArray[$offset + $i] = ord($data[$i]);
@@ -1192,16 +1291,21 @@ class Buffer implements ArrayAccess
      * @return int
      * @throws Exception
      */
-    public function offsetGet(mixed $offset): int //TODO: If this is to replace node buffer, type may be mixed
+    public function offsetGet(mixed $offset): int
     {
-        if (!isset($this->bytesArray[$offset])) {
-            throw new Exception('Requested Buffer element out of bounds');
+        if (!is_int($offset) || $offset < 0 || $offset >= $this->length) {
+            throw OutOfBoundsException::forRange('offsetGet', is_int($offset) ? $offset : 0, 1, $this->length);
         }
+
         return $this->bytesArray[$offset];
     }
 
     /**
      * Offset to set
+     *
+     * Buffers are fixed size, as in Node. A write outside the buffer is a
+     * silent no-op rather than a reallocation, so a mistyped index cannot
+     * change the buffer's length. Use set() or appendBuffer() to grow a buffer.
      *
      * @param mixed $offset
      * @param mixed $value
@@ -1209,30 +1313,24 @@ class Buffer implements ArrayAccess
      */
     public function offsetSet(mixed $offset, mixed $value): void
     {
-        if (is_int($offset) && $offset >= 0) {
-            if ($offset >= $this->length) {
-                $newBytesArray = new SplFixedArray($offset + 1);
-                for ($i = 0; $i < $this->length; $i++) {
-                    $newBytesArray[$i] = $this->bytesArray[$i];
-                }
-                for ($i = $this->length; $i < $offset; $i++) {
-                    $newBytesArray[$i] = self::DEFAULT_FILL;
-                }
-                $this->bytesArray = $newBytesArray;
-                $this->length = $offset + 1;
-            }
-            $this->bytesArray[$offset] = (int)$value & 0xFF;
+        if (!is_int($offset) || $offset < 0 || $offset >= $this->length) {
+            return;
         }
+
+        $this->bytesArray[$offset] = (int)$value & 0xFF;
     }
 
     /**
      * Offset to unset
+     *
+     * No-op. Node has no concept of unsetting a byte, and removing one here
+     * would leave a null in the storage that only surfaces on a later read.
+     * Write 0x00 explicitly if that is what you mean.
      *
      * @param mixed $offset
      * @return void
      */
     public function offsetUnset(mixed $offset): void
     {
-        unset($this->bytesArray[$offset]);
     }
 }
