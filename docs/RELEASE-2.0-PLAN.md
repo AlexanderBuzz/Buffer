@@ -29,8 +29,8 @@ public function getBytesArray(): SplFixedArray
 public function setBytesArray(SplFixedArray $bytesArray): void
 ```
 
-Damit ist `SplFixedArray` Teil des öffentlichen Vertrags — Punkt A ist ein Breaking Change und gehört in dasselbe Fenster wie Punkt E.
-**Entwarnung:** `XRPL-PHP` ruft **keine** der beiden Methoden auf (verifiziert über `src/` und `tests/`). Der Umbau ist für den einzigen bekannten Konsumenten folgenlos.
+Damit ist `SplFixedArray` Teil des öffentlichen Vertrags.
+**Aufgelöst:** Beide Methoden lassen sich als Cast-Adapter erhalten (`SplFixedArray::fromArray($this->toArray())` bzw. Rückweg) — signatur- und verhaltensgleich, im Spike implementiert und verifiziert. Punkt A ist damit **kein** Breaking Change. Preis ist ein 25x-Faktor auf genau diesen beiden Methoden; `XRPL-PHP` ruft keine von beiden auf (0 Treffer in `src/` und `tests/`).
 
 **(2) Der `subArray()`-Absturz sitzt eine Zeile weiter unten als beschrieben.**
 Die Klemme auf `max(0, …)` ist bereits vorhanden — die *nachfolgende* Zeile macht sie wieder kaputt:
@@ -45,6 +45,8 @@ Verifiziert: `Buffer::from('0102030405','hex')->subArray(10)` wirft `ValueError`
 **(3) `toInt()` liefert bei Überlänge keinen Zufallswert, sondern sättigt.**
 `Buffer::from(str_repeat('FF',32),'hex')->toInt()` ergibt exakt `9223372036854775807` (`PHP_INT_MAX`). Deterministisch falsch statt zufällig falsch — das macht den Fehler in Aufrufercode unauffälliger, nicht harmloser.
 
+**(4) Ein sechster Bug, im Handover nicht erfasst.** `concat()` mit einem `$totalLength` größer als die Summe der Eingaben lässt die überzähligen Slots als `null` stehen — `Buffer::concat([...], 6)->toString('hex')` wirft `TypeError: dechex(null)`. Node füllt mit Nullbytes. Gleiche Fehlerklasse wie `offsetUnset()`.
+
 *Nebenbefund:* OOB-Lesen wirft `OutOfBoundsException` (aus `SplFixedArray`), nicht `RuntimeException`. Für die Vereinheitlichung in Phase 2 relevant.
 
 ### Alle Bugs reproduziert
@@ -55,6 +57,7 @@ $buf[9] = 0xFF auf 5 Bytes → Länge wächst still auf 10   (Node: No-Op)
 unset($buf[2]); ->toString() → TypeError: dechex(null)   (Node: No-Op)
 toInt() auf 32 Bytes       → 9223372036854775807         (still falsch)
 $buf->length = 2           → Buffer inkonsistent zum Bytes-Speicher
+concat([2B,1B], 6)         → [170,187,204,null,null,null] → TypeError  (neu)
 ```
 
 ## 3. Versionsentscheidung: **2.0.0**
@@ -69,11 +72,18 @@ Punkt E (`public $length` schließen) *und* Punkt A (`get/setBytesArray` entfern
 
 Reihenfolge folgt dem Handover; Phase 0 ist ergänzt, weil Phase 3 sonst unbelegt bleibt.
 
-### Phase 0 — Messlatte (neu)
-**Warum:** Der gesamte Nutzen von Phase 3 ist Performance. Ohne Vorher-Messung ist der Umbau eine Behauptung.
-- Micro-Benchmark-Skript (kein Framework nötig) für die heißen Pfade: `from` (73 Aufrufe in XRPL-PHP), `toString` (32), `slice` (23), `alloc`/`getLength`/`toArray` (je 22), `toInt` (16), `toUtf8` (14), `concat` (12), `readUInt8` (10).
-- Zahlen als Baseline im PR festhalten.
-**DoD:** Reproduzierbare Vorher-Zahlen, eingecheckt unter `tests/Benchmark/`.
+### Phase 0 — Messlatte ✅ **erledigt**
+Benchmarks und Prototyp liegen unter `tests/Benchmark/`, Ergebnisse in
+[`docs/SPIKE-string-backing.md`](SPIKE-string-backing.md).
+
+**Kernergebnis:** String-Backing bringt **4–7x auf realistischen Codec-Workloads**
+und **4,4x weniger Speicher**. Selbst der bewusst gegen String-Backing konstruierte
+Worst Case (`toArray`-lastig) ist noch 1,38x schneller — es gibt keinen gemessenen
+Workload, der langsamer wird. Drei Einzelmethoden regressieren (`toArray` 0,23x,
+`readUInt8` 0,90x, `getBytesArray` 0,04x); Wirkung und Grenzen sind im Spike vermessen.
+
+Der Prototyp ist gegen die aktuelle Implementierung verifiziert:
+`230 identical, 11 expected divergences (1.x bugs), 0 unexpected mismatches`.
 
 ### Phase 1 — Testabdeckung (Handover F)
 **Warum:** Voraussetzung für alles Weitere. 197 Zeilen Test gegen 1237 Zeilen Code, unter dem Signierpfad — zu dünn zum Refactoren.
@@ -88,20 +98,24 @@ Reihenfolge folgt dem Handover; Phase 0 ist ergänzt, weil Phase 3 sonst unbeleg
 3. `offsetUnset()` — No-Op statt `null`-Loch, das `toUtf8()`/`toString()` später zerlegt.
 4. Einheitliche Fehlerstrategie: `readUInt8`/`writeUInt8` etc. prüfen Grenzen selbst und werfen dieselbe, dokumentierte Exception wie `offsetGet` — statt einmal `OutOfBoundsException`, einmal `Exception`.
 5. `toInt()` — Guard auf ≤ 8 Byte; darüber Exception statt stiller Sättigung. Sauberer Ersatzweg entsteht in Phase 5 (`readBigUInt64BE`).
-**DoD:** Alle fünf Reproduktionen aus §2 verhalten sich wie Node; Phase-1-Tests bleiben grün.
+6. `concat()` mit zu großem `$totalLength` — mit Nullbytes auffüllen statt `null`-Löcher zu hinterlassen.
+**DoD:** Alle sechs Reproduktionen aus §2 verhalten sich wie Node; Phase-1-Tests bleiben grün.
 
-### Phase 3 — Breaking-Change-Fenster (Handover E + A-Vorbereitung)
+### Phase 3 — Breaking-Change-Fenster (Handover E)
+Durch den Spike auf einen einzigen Punkt geschrumpft:
 - `public int $length` → `private`, Zugriff ausschließlich über `getLength()`.
-- `getBytesArray()`/`setBytesArray()` entfernen oder auf `toArray()`/`from(array)` umbiegen — sie sind der zweite Leak der Interna.
-- **Vorher gegenprüfen:** `grep -rn 'getBytesArray\|setBytesArray\|->length' <consumer>/src` — für XRPL-PHP bereits erledigt: **0 Treffer**.
+- `getBytesArray()`/`setBytesArray()` **bleiben** — als Cast-Adapter (§2.1). Kein Bruch.
+- **Vorher gegenprüfen:** `grep -rn -e 'getBytesArray' -e 'setBytesArray' -e '->length' <consumer>/src` — für XRPL-PHP bereits erledigt: **0 Treffer**.
 **DoD:** `composer.json`-Version/Tag auf 2.0.0 vorbereitet; `UPGRADING.md` mit 1.x → 2.0-Pfad.
 
-### Phase 4 — String-Backing (Handover A) · der Performance-Hebel
-**Warum:** `SplFixedArray` von Integers heißt ein zval pro Byte. PHPs String *ist* bereits ein Byte-Array — kompakter und schneller, und das läuft im Codec pro Feld pro Transaktion.
+### Phase 4 — String-Backing (Handover A) · **im Spike belegt**
+**Warum:** `SplFixedArray` von Integers heißt ein zval pro Byte — gemessen 717 Byte für einen 32-Byte-Buffer. PHPs String *ist* bereits ein Byte-Array, und das läuft im Codec pro Feld pro Transaktion. Zahlen: siehe Phase 0.
 - `from($hex)`: Regex → `str_split` → `array_map('hexdec')` → Schleife ⟹ **ein `hex2bin()`**.
 - `toString('hex')`: byteweise `dechex`+`str_pad`+Konkatenation ⟹ **`strtoupper(bin2hex(...))`**.
 - `from(Buffer)`, `subArray`, `toUtf8`: elementweise Schleifen ⟹ `substr`/Zuweisung.
-**DoD:** Phase-1-Suite unverändert grün (das ist der ganze Sinn der Characterization-Tests); Phase-0-Benchmark zeigt die Verbesserung in Zahlen.
+- Der Prototyp in `tests/Benchmark/BufferStr.php` ist die Vorlage — er deckt die heißen Pfade bereits ab und ist gegen 1.x verifiziert.
+- **Aufräumen danach:** `BufferStr.php` entfällt, die Benchmarks laufen gegen `Buffer` selbst.
+**DoD:** Phase-1-Suite unverändert grün (das ist der ganze Sinn der Characterization-Tests); Benchmark bestätigt die Spike-Zahlen an der echten Klasse.
 
 ### Phase 5 — Parität (Handover C + D) · additiv
 **Dokumentieren** (bewusste Abweichungen, nicht ändern):
@@ -115,6 +129,8 @@ Reihenfolge folgt dem Handover; Phase 0 ist ergänzt, weil Phase 3 sonst unbeleg
 - `toJSON`, `entries`/`keys`/`values`, `transcode`
 **DoD:** README dokumentiert die drei Abweichungen explizit; neue Methoden getestet.
 
+*Nebenbefund aus dem Spike, XRPL-PHP-seitig:* Mehrere `toArray()`-Stellen dort sind Array-Umwege der Form `Buffer::from(array_merge($a->toArray(), $b->toArray(), ...))` (z. B. `Amount.php:156`). Als `Buffer::concat([...])` geschrieben — identisches Ergebnis — geht derselbe Code von 2,0x auf 5,4x. Lohnt einen eigenen Durchgang im XRPL-PHP-Release.
+
 ### Phase 6 — Release & Kopplung
 - Tag `v2.0.0`, Packagist.
 - In `XRPL-PHP`: Constraint auf `^2.0` heben, volle Suite fahren, Buffer-Änderungen im dortigen `CHANGELOG.md` erwähnen.
@@ -125,5 +141,5 @@ Reihenfolge folgt dem Handover; Phase 0 ist ergänzt, weil Phase 3 sonst unbeleg
 Falls die Zeit knapp wird, ist die ehrliche Reihenfolge des Handovers maßgeblich: **Buffer funktioniert heute**; den Nutzern von XRPL-PHP fehlen Transaktionstypen, nicht Buffer-Performance.
 
 - **Minimalschnitt:** Phase 1 + 2 + 3 → 2.0.0. Billig, teils sicherheitsrelevant, und schließt das Breaking-Fenster.
-- **Phase 4 und 5 sind nachrüstbar** — Phase 4 ohne weiteres Major (nach Phase 3 ist die Repräsentation gekapselt), Phase 5 rein additiv.
+- **Phase 4 und 5 sind nachrüstbar** — Phase 4 ohne jedes Major (die Cast-Adapter halten die Signaturen, siehe §2.1), Phase 5 rein additiv. Die Messung ist gemacht und verfällt nicht.
 - **Nicht abkürzen:** Phase 1 vor Phase 4. Ohne Characterization-Tests wird der String-Umbau ein Refactor ohne Netz — direkt unter dem Signierpfad.
