@@ -47,9 +47,15 @@ class Buffer implements ArrayAccess
     }
 
     /**
+     * Byte length of the buffer.
+     *
+     * Private since 2.0: it used to be public and writable, which allowed the
+     * declared length to be moved out of sync with the actual byte storage from
+     * outside the class. Read it through getLength().
+     *
      * @var int
      */
-    public int $length;
+    private int $length;
 
     /**
      * @var SplFixedArray

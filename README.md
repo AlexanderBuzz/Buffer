@@ -42,7 +42,7 @@ $buf = Buffer::from('aGVsbG8=', 'base64');
 $buf = Buffer::alloc(10);
 $buf[0] = 0x41; // 'A'
 echo $buf[0]; // 65
-echo $buf->length; // 10
+echo $buf->getLength(); // 10
 
 $buf->write('hello', 1);
 echo $buf->toUtf8(); // Ahello

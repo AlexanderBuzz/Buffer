@@ -50,7 +50,7 @@ final class BufferTest extends TestCase
         $buf = Buffer::alloc(10);
         $buf[0] = 0x41; // 'A'
         $this->assertEquals(65, $buf[0]);
-        $this->assertEquals(10, $buf->length);
+        $this->assertEquals(10, $buf->getLength());
     }
 
     public function testWriteAndToUtf8(): void
