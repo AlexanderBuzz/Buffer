@@ -92,7 +92,7 @@ Der Prototyp ist gegen die aktuelle Implementierung verifiziert:
 - *Nice-to-have:* Fixtures aus echtem Node-`Buffer`-Output als Paritätsnachweis.
 **DoD:** Line-Coverage der öffentlichen API deutlich über heute; Suite grün; keine Verhaltensänderung.
 
-### Phase 2 — Bugfixes (Handover B) · nicht breaking
+### Phase 2 — Bugfixes (Handover B) ✅ **erledigt**
 1. `subArray()` — Klemme in die `min()`-Zeile; Node-Verhalten ist ein leerer Buffer.
 2. `offsetSet()` jenseits der Länge — stiller No-Op statt Realloc (Node: Buffer sind fixer Größe).
 3. `offsetUnset()` — No-Op statt `null`-Loch, das `toUtf8()`/`toString()` später zerlegt.
@@ -101,14 +101,14 @@ Der Prototyp ist gegen die aktuelle Implementierung verifiziert:
 6. `concat()` mit zu großem `$totalLength` — mit Nullbytes auffüllen statt `null`-Löcher zu hinterlassen.
 **DoD:** Alle sechs Reproduktionen aus §2 verhalten sich wie Node; Phase-1-Tests bleiben grün.
 
-### Phase 3 — Breaking-Change-Fenster (Handover E)
+### Phase 3 — Breaking-Change-Fenster (Handover E) ✅ **erledigt**
 Durch den Spike auf einen einzigen Punkt geschrumpft:
 - `public int $length` → `private`, Zugriff ausschließlich über `getLength()`.
 - `getBytesArray()`/`setBytesArray()` **bleiben** — als Cast-Adapter (§2.1). Kein Bruch.
 - **Vorher gegenprüfen:** `grep -rn -e 'getBytesArray' -e 'setBytesArray' -e '->length' <consumer>/src` — für XRPL-PHP bereits erledigt: **0 Treffer**.
 **DoD:** `composer.json`-Version/Tag auf 2.0.0 vorbereitet; `UPGRADING.md` mit 1.x → 2.0-Pfad.
 
-### Phase 4 — String-Backing (Handover A) · **im Spike belegt**
+### Phase 4 — String-Backing (Handover A) ✅ **erledigt**
 **Warum:** `SplFixedArray` von Integers heißt ein zval pro Byte — gemessen 717 Byte für einen 32-Byte-Buffer. PHPs String *ist* bereits ein Byte-Array, und das läuft im Codec pro Feld pro Transaktion. Zahlen: siehe Phase 0.
 - `from($hex)`: Regex → `str_split` → `array_map('hexdec')` → Schleife ⟹ **ein `hex2bin()`**.
 - `toString('hex')`: byteweise `dechex`+`str_pad`+Konkatenation ⟹ **`strtoupper(bin2hex(...))`**.
@@ -117,7 +117,7 @@ Durch den Spike auf einen einzigen Punkt geschrumpft:
 - **Aufräumen danach:** `BufferStr.php` entfällt, die Benchmarks laufen gegen `Buffer` selbst.
 **DoD:** Phase-1-Suite unverändert grün (das ist der ganze Sinn der Characterization-Tests); Benchmark bestätigt die Spike-Zahlen an der echten Klasse.
 
-### Phase 5 — Parität (Handover C + D) · additiv
+### Phase 5 — Parität (Handover C + D) ✅ **erledigt**
 **Dokumentieren** (bewusste Abweichungen, nicht ändern):
 - `slice()`/`subArray()` **kopieren**; in Node sind es Views auf denselben Speicher. Kopie ist die sicherere Wahl — und XRPL-PHP verlässt sich 23× darauf. Muss laut im README stehen.
 - `toString()` defaultet auf `'hex'`, Node auf `'utf8'`.
@@ -131,7 +131,13 @@ Durch den Spike auf einen einzigen Punkt geschrumpft:
 
 *Nebenbefund aus dem Spike, XRPL-PHP-seitig:* Mehrere `toArray()`-Stellen dort sind Array-Umwege der Form `Buffer::from(array_merge($a->toArray(), $b->toArray(), ...))` (z. B. `Amount.php:156`). Als `Buffer::concat([...])` geschrieben — identisches Ergebnis — geht derselbe Code von 2,0x auf 5,4x. Lohnt einen eigenen Durchgang im XRPL-PHP-Release.
 
-### Phase 6 — Release & Kopplung
+### Phase 6 — Psalm auf Stand bringen
+Psalm 5 wirft auf PHP 8.4 Deprecations (`E_STRICT`) und ist gegenüber 8.4/8.5-Syntax im Rückstand. Der Umbau ist durch, die Suite trägt — also der richtige Moment.
+- Auf Psalm 6 heben, `psalm.xml` und ggf. `errorLevel` nachziehen.
+- CI-Job prüfen: `PSALM_PHP_VERSION` ist im Workflow nicht gesetzt, `php-version` bleibt damit leer.
+**DoD:** `vendor/bin/psalm` ohne Errors und ohne Deprecation-Rauschen auf allen Matrix-Versionen.
+
+### Phase 7 — Release & Kopplung
 - Tag `v2.0.0`, Packagist.
 - In `XRPL-PHP`: Constraint auf `^2.0` heben, volle Suite fahren, Buffer-Änderungen im dortigen `CHANGELOG.md` erwähnen.
 - *Optional vorab:* Constraint testweise auf `dev-release/2.0-hardening` zeigen lassen, um die 47 Nutzungsstellen vor dem Tag zu verifizieren.

@@ -30,6 +30,9 @@
     "php": "^8.2",
     "brick/math": "^0.11|^0.12|^0.13|^0.14"
   },
+  "suggest": {
+    "ext-mbstring": "Required by Buffer::transcode() for converting between character encodings"
+  },
   "require-dev": {
     "phpunit/phpunit": "^10.3.1",
     "vimeo/psalm": "^5.14"

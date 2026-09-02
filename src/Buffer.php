@@ -13,6 +13,8 @@ namespace Hardcastle\Buffer;
 use ArrayAccess;
 use Brick\Math\BigInteger;
 use Exception;
+use Generator;
+use Hardcastle\Buffer\Exception\BufferException;
 use Hardcastle\Buffer\Exception\InvalidArgumentException;
 use Hardcastle\Buffer\Exception\OutOfBoundsException;
 use Hardcastle\Buffer\Exception\OverflowException;
@@ -575,7 +577,7 @@ class Buffer implements ArrayAccess
     /**
      * Returns the content as byte array.
      *
-     * @return array
+     * @return list<int>
      */
     public function toArray(): array
     {
@@ -583,7 +585,10 @@ class Buffer implements ArrayAccess
             return [];
         }
 
-        return array_values(unpack('C*', $this->bytes));
+        /** @var list<int> $bytes */
+        $bytes = array_values(unpack('C*', $this->bytes));
+
+        return $bytes;
     }
 
     /**
@@ -1176,6 +1181,390 @@ class Buffer implements ArrayAccess
         $this->bytes = substr_replace($this->bytes, pack('d', $value), $offset, 8);
 
         return $offset + 8;
+    }
+
+    /**
+     * Reads byteLength bytes as an unsigned big-endian integer.
+     *
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function readUIntBE(int $offset = 0, int $byteLength = 1): int
+    {
+        self::assertByteLength($byteLength);
+        $this->assertRange('readUIntBE', $offset, $byteLength);
+
+        $value = 0;
+        for ($i = 0; $i < $byteLength; $i++) {
+            $value = ($value << 8) | ord($this->bytes[$offset + $i]);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Reads byteLength bytes as an unsigned little-endian integer.
+     *
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function readUIntLE(int $offset = 0, int $byteLength = 1): int
+    {
+        self::assertByteLength($byteLength);
+        $this->assertRange('readUIntLE', $offset, $byteLength);
+
+        $value = 0;
+        for ($i = $byteLength - 1; $i >= 0; $i--) {
+            $value = ($value << 8) | ord($this->bytes[$offset + $i]);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Reads byteLength bytes as a signed big-endian integer.
+     *
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function readIntBE(int $offset = 0, int $byteLength = 1): int
+    {
+        return self::signExtend($this->readUIntBE($offset, $byteLength), $byteLength);
+    }
+
+    /**
+     * Reads byteLength bytes as a signed little-endian integer.
+     *
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function readIntLE(int $offset = 0, int $byteLength = 1): int
+    {
+        return self::signExtend($this->readUIntLE($offset, $byteLength), $byteLength);
+    }
+
+    /**
+     * Writes value as a big-endian integer of byteLength bytes.
+     *
+     * @param int $value
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int Offset past the write.
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function writeUIntBE(int $value, int $offset = 0, int $byteLength = 1): int
+    {
+        self::assertByteLength($byteLength);
+        $this->assertRange('writeUIntBE', $offset, $byteLength);
+
+        for ($i = $byteLength - 1; $i >= 0; $i--) {
+            $this->bytes[$offset + $i] = chr($value & 0xFF);
+            $value >>= 8;
+        }
+
+        return $offset + $byteLength;
+    }
+
+    /**
+     * Writes value as a little-endian integer of byteLength bytes.
+     *
+     * @param int $value
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int Offset past the write.
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function writeUIntLE(int $value, int $offset = 0, int $byteLength = 1): int
+    {
+        self::assertByteLength($byteLength);
+        $this->assertRange('writeUIntLE', $offset, $byteLength);
+
+        for ($i = 0; $i < $byteLength; $i++) {
+            $this->bytes[$offset + $i] = chr($value & 0xFF);
+            $value >>= 8;
+        }
+
+        return $offset + $byteLength;
+    }
+
+    /**
+     * Alias of writeUIntBE(); the byte pattern for a signed value is identical.
+     *
+     * @param int $value
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int Offset past the write.
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function writeIntBE(int $value, int $offset = 0, int $byteLength = 1): int
+    {
+        return $this->writeUIntBE($value, $offset, $byteLength);
+    }
+
+    /**
+     * Alias of writeUIntLE(); the byte pattern for a signed value is identical.
+     *
+     * @param int $value
+     * @param int $offset
+     * @param int $byteLength Between 1 and 6.
+     * @return int Offset past the write.
+     * @throws InvalidArgumentException|OutOfBoundsException
+     */
+    public function writeIntLE(int $value, int $offset = 0, int $byteLength = 1): int
+    {
+        return $this->writeUIntLE($value, $offset, $byteLength);
+    }
+
+    /**
+     * Reads an unsigned 64-bit big-endian integer.
+     *
+     * Returns a BigInteger rather than an int, because unsigned 64-bit values
+     * exceed PHP's signed int range. This is the replacement for toInt() on
+     * wide values.
+     *
+     * @param int $offset
+     * @return BigInteger
+     * @throws OutOfBoundsException
+     */
+    public function readBigUInt64BE(int $offset = 0): BigInteger
+    {
+        $this->assertRange('readBigUInt64BE', $offset, 8);
+
+        return BigInteger::fromBase(bin2hex(substr($this->bytes, $offset, 8)), 16);
+    }
+
+    /**
+     * Reads an unsigned 64-bit little-endian integer.
+     *
+     * @param int $offset
+     * @return BigInteger
+     * @throws OutOfBoundsException
+     */
+    public function readBigUInt64LE(int $offset = 0): BigInteger
+    {
+        $this->assertRange('readBigUInt64LE', $offset, 8);
+
+        return BigInteger::fromBase(bin2hex(strrev(substr($this->bytes, $offset, 8))), 16);
+    }
+
+    /**
+     * Reads a signed 64-bit big-endian integer.
+     *
+     * @param int $offset
+     * @return BigInteger
+     * @throws OutOfBoundsException
+     */
+    public function readBigInt64BE(int $offset = 0): BigInteger
+    {
+        return self::toSigned64($this->readBigUInt64BE($offset));
+    }
+
+    /**
+     * Reads a signed 64-bit little-endian integer.
+     *
+     * @param int $offset
+     * @return BigInteger
+     * @throws OutOfBoundsException
+     */
+    public function readBigInt64LE(int $offset = 0): BigInteger
+    {
+        return self::toSigned64($this->readBigUInt64LE($offset));
+    }
+
+    /**
+     * Writes an unsigned 64-bit big-endian integer.
+     *
+     * @param BigInteger|int|string $value
+     * @param int $offset
+     * @return int Offset past the write.
+     * @throws OutOfBoundsException
+     */
+    public function writeBigUInt64BE(BigInteger|int|string $value, int $offset = 0): int
+    {
+        $this->assertRange('writeBigUInt64BE', $offset, 8);
+        $this->bytes = substr_replace($this->bytes, self::toEightBytes($value), $offset, 8);
+
+        return $offset + 8;
+    }
+
+    /**
+     * Writes an unsigned 64-bit little-endian integer.
+     *
+     * @param BigInteger|int|string $value
+     * @param int $offset
+     * @return int Offset past the write.
+     * @throws OutOfBoundsException
+     */
+    public function writeBigUInt64LE(BigInteger|int|string $value, int $offset = 0): int
+    {
+        $this->assertRange('writeBigUInt64LE', $offset, 8);
+        $this->bytes = substr_replace($this->bytes, strrev(self::toEightBytes($value)), $offset, 8);
+
+        return $offset + 8;
+    }
+
+    /**
+     * Writes a signed 64-bit big-endian integer.
+     *
+     * @param BigInteger|int|string $value
+     * @param int $offset
+     * @return int Offset past the write.
+     * @throws OutOfBoundsException
+     */
+    public function writeBigInt64BE(BigInteger|int|string $value, int $offset = 0): int
+    {
+        return $this->writeBigUInt64BE(self::toUnsigned64($value), $offset);
+    }
+
+    /**
+     * Writes a signed 64-bit little-endian integer.
+     *
+     * @param BigInteger|int|string $value
+     * @param int $offset
+     * @return int Offset past the write.
+     * @throws OutOfBoundsException
+     */
+    public function writeBigInt64LE(BigInteger|int|string $value, int $offset = 0): int
+    {
+        return $this->writeBigUInt64LE(self::toUnsigned64($value), $offset);
+    }
+
+    /**
+     * JSON representation, matching Node's Buffer#toJSON().
+     *
+     * @return array{type: string, data: list<int>}
+     */
+    public function toJSON(): array
+    {
+        return ['type' => 'Buffer', 'data' => $this->toArray()];
+    }
+
+    /**
+     * Iterates over the buffer indices.
+     *
+     * @return Generator<int, int>
+     */
+    public function keys(): Generator
+    {
+        for ($i = 0; $i < $this->length; $i++) {
+            yield $i;
+        }
+    }
+
+    /**
+     * Iterates over the byte values.
+     *
+     * @return Generator<int, int>
+     */
+    public function values(): Generator
+    {
+        for ($i = 0; $i < $this->length; $i++) {
+            yield ord($this->bytes[$i]);
+        }
+    }
+
+    /**
+     * Iterates over [index, byte] pairs.
+     *
+     * @return Generator<int, array{int, int}>
+     */
+    public function entries(): Generator
+    {
+        for ($i = 0; $i < $this->length; $i++) {
+            yield [$i, ord($this->bytes[$i])];
+        }
+    }
+
+    /**
+     * Re-encodes a buffer from one character encoding to another.
+     *
+     * Requires ext-mbstring. Unlike Node, which silently substitutes
+     * characters that the target encoding cannot represent, this delegates to
+     * mb_convert_encoding() and inherits its substitution behaviour.
+     *
+     * @param Buffer $source
+     * @param string $fromEncoding
+     * @param string $toEncoding
+     * @return Buffer
+     * @throws BufferException If ext-mbstring is unavailable.
+     */
+    public static function transcode(Buffer $source, string $fromEncoding, string $toEncoding): Buffer
+    {
+        if (!function_exists('mb_convert_encoding')) {
+            throw new BufferException('Buffer::transcode() requires ext-mbstring.');
+        }
+
+        return self::wrap((string)mb_convert_encoding($source->bytes, $toEncoding, $fromEncoding));
+    }
+
+    /**
+     * @param int $byteLength
+     * @return void
+     * @throws InvalidArgumentException
+     */
+    private static function assertByteLength(int $byteLength): void
+    {
+        if ($byteLength < 1 || $byteLength > 6) {
+            throw new InvalidArgumentException(sprintf(
+                'The value of "byteLength" is out of range. It must be between 1 and 6, %d given. '
+                . 'Use the readBigUInt64/readBigInt64 family for wider values.',
+                $byteLength
+            ));
+        }
+    }
+
+    /**
+     * @param int $value
+     * @param int $byteLength
+     * @return int
+     */
+    private static function signExtend(int $value, int $byteLength): int
+    {
+        $signBit = 1 << ($byteLength * 8 - 1);
+
+        return $value >= $signBit ? $value - ($signBit << 1) : $value;
+    }
+
+    /**
+     * @param BigInteger $value
+     * @return BigInteger
+     */
+    private static function toSigned64(BigInteger $value): BigInteger
+    {
+        $limit = BigInteger::of(2)->power(63);
+
+        return $value->isGreaterThanOrEqualTo($limit) ? $value->minus($limit->multipliedBy(2)) : $value;
+    }
+
+    /**
+     * @param BigInteger|int|string $value
+     * @return BigInteger
+     */
+    private static function toUnsigned64(BigInteger|int|string $value): BigInteger
+    {
+        $big = $value instanceof BigInteger ? $value : BigInteger::of($value);
+
+        return $big->isNegative() ? $big->plus(BigInteger::of(2)->power(64)) : $big;
+    }
+
+    /**
+     * @param BigInteger|int|string $value
+     * @return string Exactly eight raw bytes, big-endian.
+     */
+    private static function toEightBytes(BigInteger|int|string $value): string
+    {
+        $big = $value instanceof BigInteger ? $value : BigInteger::of($value);
+        $hex = $big->toBase(16);
+
+        return (string)hex2bin(str_pad($hex, 16, '0', STR_PAD_LEFT));
     }
 
     /**
