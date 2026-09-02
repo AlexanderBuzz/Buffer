@@ -11,6 +11,8 @@
         <directory name="tests" />
         <ignoreFiles>
             <directory name="vendor" />
+            <!-- Throwaway spike code, removed after phase 4. See tests/Benchmark/README.md -->
+            <directory name="tests/Benchmark" />
         </ignoreFiles>
     </projectFiles>
 </psalm>
