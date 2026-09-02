@@ -13,6 +13,8 @@ namespace Hardcastle\Buffer\Exception;
 /**
  * Thrown when an argument is of an unsupported type or shape, for example an
  * unsupported source passed to Buffer::from().
+ *
+ * @psalm-api
  */
 class InvalidArgumentException extends BufferException
 {

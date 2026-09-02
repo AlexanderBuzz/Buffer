@@ -17,6 +17,8 @@ use RuntimeException;
  *
  * Extends RuntimeException, so existing `catch (\Exception $e)` blocks keep
  * working while callers that want to be specific can catch this instead.
+ *
+ * @psalm-api
  */
 class BufferException extends RuntimeException
 {

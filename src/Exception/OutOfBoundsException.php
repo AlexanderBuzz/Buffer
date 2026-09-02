@@ -15,6 +15,8 @@ namespace Hardcastle\Buffer\Exception;
  *
  * This is the equivalent of Node's ERR_OUT_OF_RANGE and is thrown uniformly by
  * every accessor: ArrayAccess reads as well as the read*() and write*() family.
+ *
+ * @psalm-api
  */
 class OutOfBoundsException extends BufferException
 {

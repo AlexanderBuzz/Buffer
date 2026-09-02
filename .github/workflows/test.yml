@@ -3,9 +3,11 @@ on: push
 
 jobs:
   phpunit:
+    name: "PHP ${{ matrix.php-version }} (${{ matrix.deps }})"
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         php-version:
           - "8.2"
@@ -20,23 +22,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php-version }}
-          tools: composer, phpunit
-          extensions: ds, gmp, sockets
+          tools: composer
+          extensions: gmp, mbstring
           coverage: none
 
       - name: Install composer dependencies
-        uses: ramsey/composer-install@v1
+        uses: ramsey/composer-install@v3
         with:
           dependency-versions: ${{ matrix.deps }}
 
-      - name: Run PHPUnit with coverage
-        run: |
-          mkdir -p build/logs
-          vendor/bin/phpunit --fail-on-skipped --coverage-clover build/logs/clover.xml
-        if: ${{ matrix.php-version == env.COVERAGE_PHP_VERSION }}
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit --fail-on-skipped

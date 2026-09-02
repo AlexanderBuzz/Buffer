@@ -131,11 +131,17 @@ Durch den Spike auf einen einzigen Punkt geschrumpft:
 
 *Nebenbefund aus dem Spike, XRPL-PHP-seitig:* Mehrere `toArray()`-Stellen dort sind Array-Umwege der Form `Buffer::from(array_merge($a->toArray(), $b->toArray(), ...))` (z. B. `Amount.php:156`). Als `Buffer::concat([...])` geschrieben — identisches Ergebnis — geht derselbe Code von 2,0x auf 5,4x. Lohnt einen eigenen Durchgang im XRPL-PHP-Release.
 
-### Phase 6 — Psalm auf Stand bringen
+### Phase 6 — Psalm auf Stand bringen ✅ **erledigt**
 Psalm 5 wirft auf PHP 8.4 Deprecations (`E_STRICT`) und ist gegenüber 8.4/8.5-Syntax im Rückstand. Der Umbau ist durch, die Suite trägt — also der richtige Moment.
-- Auf Psalm 6 heben, `psalm.xml` und ggf. `errorLevel` nachziehen.
-- CI-Job prüfen: `PSALM_PHP_VERSION` ist im Workflow nicht gesetzt, `php-version` bleibt damit leer.
-**DoD:** `vendor/bin/psalm` ohne Errors und ohne Deprecation-Rauschen auf allen Matrix-Versionen.
+Psalm 5.26 → 6.16.1. Deprecation-Rauschen weg, 0 Errors.
+
+Dabei zwei CI-Fehler gefunden, die beide dazu führten, dass der jeweilige Job faktisch nichts geprüft hat:
+- **`test.yml`: `COVERAGE_PHP_VERSION` war nirgends definiert.** Der PHPUnit-Schritt hing an `if: matrix.php-version == env.COVERAGE_PHP_VERSION`, verglich also gegen den leeren String — die Bedingung war in *jedem* Matrix-Eintrag falsch. **Die Testsuite ist nie gelaufen**, die Jobs waren nur deshalb grün. Der Schritt läuft jetzt unbedingt; die ungenutzte Clover-Erzeugung ist raus (sie hätte mit `coverage: none` ohnehin nicht funktioniert, und kein Schritt hat die Datei konsumiert).
+- **`psalm.yml`: `PSALM_PHP_VERSION` war ebenso undefiniert**, `php-version` damit leer. Jetzt auf `8.2` gepinnt.
+
+Nebenbei: `actions/checkout` v2/v3 → v4, `ramsey/composer-install` v1 → v3, `mbstring` in die Extension-Liste (sonst würde `--fail-on-skipped` am übersprungenen `transcode`-Test scheitern).
+
+**DoD erfüllt:** Psalm 6 ohne Errors, Suite grün — verifiziert auch gegen die niedrigste erlaubte `brick/math` 0.11.0.
 
 ### Phase 7 — Release & Kopplung
 - Tag `v2.0.0`, Packagist.

@@ -13,6 +13,8 @@ namespace Hardcastle\Buffer\Exception;
 /**
  * Thrown when a value cannot be represented in the requested target type,
  * for example a buffer larger than 8 bytes converted through toInt().
+ *
+ * @psalm-api
  */
 class OverflowException extends BufferException
 {

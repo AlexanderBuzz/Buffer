@@ -22,6 +22,8 @@ use SplFixedArray;
 
 /**
  * Implements the functionality of Node.js Buffer (https://nodejs.org/api/buffer.html).
+ *
+ * @psalm-api
  * @template-implements ArrayAccess<int, int>
  */
 class Buffer implements ArrayAccess
@@ -146,7 +148,7 @@ class Buffer implements ArrayAccess
 
         if (is_string($source)) {
             if ($encoding === 'hex') {
-                $source = preg_replace('/[^a-fA-F0-9xX]/', '', $source);
+                $source = (string)preg_replace('/[^a-fA-F0-9xX]/', '', $source);
                 if (str_starts_with($source, '0x') || str_starts_with($source, '0X')) {
                     $source = substr($source, 2);
                 }
@@ -585,8 +587,13 @@ class Buffer implements ArrayAccess
             return [];
         }
 
+        $unpacked = unpack('C*', $this->bytes);
+        if ($unpacked === false) {
+            return [];
+        }
+
         /** @var list<int> $bytes */
-        $bytes = array_values(unpack('C*', $this->bytes));
+        $bytes = array_values($unpacked);
 
         return $bytes;
     }
@@ -1077,7 +1084,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readFloatBE', $offset, 4);
 
-        return unpack('f', strrev(substr($this->bytes, $offset, 4)))[1];
+        return self::unpackOne('f', strrev(substr($this->bytes, $offset, 4)));
     }
 
     /**
@@ -1090,7 +1097,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readFloatLE', $offset, 4);
 
-        return unpack('f', substr($this->bytes, $offset, 4))[1];
+        return self::unpackOne('f', substr($this->bytes, $offset, 4));
     }
 
     /**
@@ -1103,7 +1110,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readDoubleBE', $offset, 8);
 
-        return unpack('d', strrev(substr($this->bytes, $offset, 8)))[1];
+        return self::unpackOne('d', strrev(substr($this->bytes, $offset, 8)));
     }
 
     /**
@@ -1116,7 +1123,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readDoubleLE', $offset, 8);
 
-        return unpack('d', substr($this->bytes, $offset, 8))[1];
+        return self::unpackOne('d', substr($this->bytes, $offset, 8));
     }
 
     /**
@@ -1503,6 +1510,20 @@ class Buffer implements ArrayAccess
         }
 
         return self::wrap((string)mb_convert_encoding($source->bytes, $toEncoding, $fromEncoding));
+    }
+
+    /**
+     * Unpacks a single float or double, normalising unpack()'s false return.
+     *
+     * @param string $format
+     * @param string $data
+     * @return float
+     */
+    private static function unpackOne(string $format, string $data): float
+    {
+        $unpacked = unpack($format, $data);
+
+        return $unpacked === false ? 0.0 : (float)$unpacked[1];
     }
 
     /**

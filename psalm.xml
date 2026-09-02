@@ -2,6 +2,7 @@
 <psalm
         errorLevel="2"
         resolveFromConfigFile="true"
+        findUnusedCode="false"
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xmlns="https://getpsalm.org/schema/config"
         xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
@@ -11,8 +12,16 @@
         <directory name="tests" />
         <ignoreFiles>
             <directory name="vendor" />
-            <!-- Throwaway spike code, removed after phase 4. See tests/Benchmark/README.md -->
+            <!-- Benchmarks are scripts, not library code. See tests/Benchmark/README.md -->
             <directory name="tests/Benchmark" />
         </ignoreFiles>
     </projectFiles>
+
+    <issueHandlers>
+        <!--
+            #[\Override] is PHP 8.3+, and this library supports 8.2. Re-enable
+            once the floor moves.
+        -->
+        <MissingOverrideAttribute errorLevel="suppress" />
+    </issueHandlers>
 </psalm>
