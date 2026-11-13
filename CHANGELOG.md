@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.1.0] - 2026-11-13
 
 ### Added
 
@@ -113,4 +113,5 @@ returns raw bytes without decoding, and a negative `byteOffset` in
   defined, so the comparison was against the empty string and the test suite
   had never actually run in CI.
 
+[2.1.0]: https://github.com/AlexanderBuzz/Buffer/releases/tag/2.1.0
 [2.0.0]: https://github.com/AlexanderBuzz/Buffer/releases/tag/2.0.0
