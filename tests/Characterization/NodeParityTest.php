@@ -95,6 +95,31 @@ final class NodeParityTest extends TestCase
         $this->assertSame(PHP_INT_MAX, Buffer::from('7FFFFFFFFFFFFFFF', 'hex')->toInt());
     }
 
+    /**
+     * The same defect within 8 bytes: from 0x8000000000000000 the unsigned
+     * value no longer fits PHP's signed int, and toInt() returned PHP_INT_MAX.
+     *
+     * @dataProvider eightByteValuesAbovePhpIntMax
+     */
+    public function testToIntRejectsEightByteValuesAbovePhpIntMax(string $hex): void
+    {
+        $this->expectException(OverflowException::class);
+        $this->expectExceptionMessage("Cannot convert 0x{$hex} to int without loss");
+
+        Buffer::from($hex, 'hex')->toInt();
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function eightByteValuesAbovePhpIntMax(): array
+    {
+        return [
+            'PHP_INT_MAX + 1' => ['8000000000000000'],
+            'all bits set' => ['FFFFFFFFFFFFFFFF'],
+        ];
+    }
+
     public function testToDecimalStringRemainsTheRouteForWideValues(): void
     {
         $this->assertSame(

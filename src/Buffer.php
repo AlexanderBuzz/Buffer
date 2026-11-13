@@ -599,13 +599,15 @@ class Buffer implements ArrayAccess
     }
 
     /**
-     * Returns the buffer content as an integer.
+     * Returns the buffer content as an unsigned big-endian integer.
      *
-     * Limited to 8 bytes, because anything wider cannot be represented by a PHP
-     * int. Use toDecimalString() or readBigUInt64BE() for larger values.
+     * Limited to what a PHP int holds: at most 8 bytes, and of 8 bytes only
+     * values up to 0x7FFFFFFFFFFFFFFF, because PHP's int is signed. Use
+     * toDecimalString() or readBigUInt64BE() for larger values. An empty
+     * buffer is 0.
      *
      * @return int
-     * @throws OverflowException If the buffer is longer than 8 bytes.
+     * @throws OverflowException If the value does not fit in a PHP int.
      */
     public function toInt(): int
     {
@@ -617,29 +619,47 @@ class Buffer implements ArrayAccess
             ));
         }
 
-        if ($this->length === 0) {
-            return 0;
+        $value = self::unsignedFromBytes($this->bytes);
+
+        if ($value->isGreaterThan(PHP_INT_MAX)) {
+            throw new OverflowException(sprintf(
+                'Cannot convert 0x%s to int without loss; it is larger than PHP_INT_MAX. '
+                . 'Use toDecimalString() or readBigUInt64BE() instead.',
+                $this->toString('hex')
+            ));
         }
 
-        return (int)BigInteger::fromBase($this->toString('hex'), 16)->toBase(10);
+        return $value->toInt();
     }
 
     /**
-     * Returns the big integer as decimal string.
+     * Returns the buffer content as an unsigned big-endian integer, in decimal.
+     * An empty buffer is "0", as in toInt().
      *
      * @return string
      */
     public function toDecimalString(): string
     {
-        return BigInteger::fromBase($this->toString('hex'), 16)->toBase(10);
+        return self::unsignedFromBytes($this->bytes)->toBase(10);
     }
 
     /**
-     * Decodes buf to a UTF-8 string.
+     * Returns the raw bytes, without decoding or validating them as UTF-8.
+     * The same as toBinaryString(); kept under this name for existing callers.
      *
      * @return string
      */
     public function toUtf8(): string
+    {
+        return $this->bytes;
+    }
+
+    /**
+     * Returns the raw bytes as a PHP string, one character per byte.
+     *
+     * @return string
+     */
+    public function toBinaryString(): string
     {
         return $this->bytes;
     }
@@ -1345,7 +1365,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readBigUInt64BE', $offset, 8);
 
-        return BigInteger::fromBase(bin2hex(substr($this->bytes, $offset, 8)), 16);
+        return self::unsignedFromBytes(substr($this->bytes, $offset, 8));
     }
 
     /**
@@ -1359,7 +1379,7 @@ class Buffer implements ArrayAccess
     {
         $this->assertRange('readBigUInt64LE', $offset, 8);
 
-        return BigInteger::fromBase(bin2hex(strrev(substr($this->bytes, $offset, 8))), 16);
+        return self::unsignedFromBytes(strrev(substr($this->bytes, $offset, 8)));
     }
 
     /**
@@ -1552,6 +1572,21 @@ class Buffer implements ArrayAccess
         $signBit = 1 << ($byteLength * 8 - 1);
 
         return $value >= $signBit ? $value - ($signBit << 1) : $value;
+    }
+
+    /**
+     * Reads bytes as an unsigned big-endian integer. No bytes are zero:
+     * brick/math refuses an empty number, and since 1.0 its signature says so.
+     */
+    private static function unsignedFromBytes(string $bytes): BigInteger
+    {
+        $hex = bin2hex($bytes);
+
+        if ($hex === '') {
+            return BigInteger::zero();
+        }
+
+        return BigInteger::fromBase($hex, 16);
     }
 
     /**

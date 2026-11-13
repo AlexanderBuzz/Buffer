@@ -3,6 +3,30 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Support for `brick/math` 1.0, next to 0.11 to 0.14.
+- `toBinaryString()`, the raw bytes as a PHP string. It is what `toUtf8()`
+  has always returned, under a name that does not suggest UTF-8 decoding;
+  `toUtf8()` stays.
+
+### Fixed
+
+- `toDecimalString()` of an empty buffer threw brick/math's
+  `NumberFormatException` ("The number cannot be empty"). It now returns
+  `"0"`, as `toInt()` returns `0`.
+- `toInt()` of an 8-byte buffer from `0x8000000000000000` up silently returned
+  `PHP_INT_MAX`, because the unsigned value does not fit PHP's signed `int`. It
+  now throws `OverflowException`, like a buffer wider than 8 bytes. Code that
+  needs these values uses `toDecimalString()` or `readBigUInt64BE()`.
+
+### Internal
+
+- `.gitattributes` keeps tests, docs and CI configuration out of the Composer
+  package.
+
 ## [2.0.0] - 2026-09-02
 
 Hardening release ahead of the next `xrpl-php`. One breaking change, six
