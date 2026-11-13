@@ -1,8 +1,51 @@
 name: Unit Tests (PHPUnit)
 on: push
 
+# Nothing here writes to GitHub.
+permissions:
+  contents: read
+
 jobs:
-  phpunit:
+  # The versions in composer.lock: every run tests the same ones, and a new release reaches CI only
+  # through a reviewed update of the lock.
+  locked:
+    name: Locked dependencies (PHP 8.2)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.2"
+          tools: composer:v2
+          extensions: gmp, mbstring
+          coverage: none
+
+      - name: Install composer dependencies
+        run: composer install --no-interaction --no-progress
+
+      # Known vulnerabilities in the locked versions: high and critical ones in the runtime
+      # dependencies fail the run; all others are listed without failing it. The `unlocked` job
+      # audits what a user installs.
+      - name: Composer audit (listed, not failing)
+        run: composer audit --abandoned=report || true
+
+      - name: No high or critical advisory in the runtime dependencies
+        run: composer audit --no-dev --abandoned=ignore --ignore-severity=low --ignore-severity=medium
+
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit --fail-on-skipped
+
+  # Users never get the locked versions; they install whatever the constraints in composer.json
+  # allow. So the tests also run without the lock: with the highest versions on every supported PHP
+  # (the platform pin in composer.json lifted) and with the lowest on PHP 8.2. No cooldown here:
+  # users get a new release at once, so this job has to see it at once too.
+  unlocked:
     name: "PHP ${{ matrix.php-version }} (${{ matrix.deps }})"
     runs-on: ubuntu-latest
 
@@ -22,20 +65,58 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php-version }}
-          tools: composer
+          tools: composer:v2
           extensions: gmp, mbstring
           coverage: none
 
-      - name: Install composer dependencies
-        uses: ramsey/composer-install@v3
-        with:
-          dependency-versions: ${{ matrix.deps }}
+      - name: Resolve the ${{ matrix.deps }} allowed versions
+        env:
+          DEPENDENCIES: ${{ matrix.deps }}
+        run: |
+          composer --version
+          if [ "$DEPENDENCIES" = highest ]; then
+            composer config --unset platform.php
+            composer update --no-interaction --no-progress
+          else
+            # Composer skips versions with a known advisory while resolving, so a declared
+            # minimum with an advisory would be replaced by a later version and never tested.
+            # The lowest run turns that off; the bounds in composer.json are what it checks.
+            COMPOSER_NO_SECURITY_BLOCKING=1 composer update --prefer-lowest --prefer-stable --no-interaction --no-progress
+          fi
+
+      - name: No high or critical advisory in what a user installs
+        if: matrix.deps == 'highest'
+        run: composer audit --no-dev --abandoned=ignore --ignore-severity=low --ignore-severity=medium
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit --fail-on-skipped
+
+  # Every external action is referenced by a full commit SHA, with its version as a comment: a tag
+  # can be moved to other code, a commit cannot. Dependabot keeps the SHAs current.
+  pinned:
+    name: Actions pinned to commit SHAs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Every external action is pinned to a full commit SHA
+        run: |
+          # The key is spelled apart, so this file does not match its own pattern.
+          key=uses
+          unpinned=$(grep -rnoE "${key}:\s*[^ #]+" .github/ | grep -v "${key}: \./" | grep -vE '@[0-9a-f]{40}$' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::Actions not pinned to a full commit SHA (owner/action@<sha> # vX.Y.Z):"
+            echo "$unpinned"
+            exit 1
+          fi
