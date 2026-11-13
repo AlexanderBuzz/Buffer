@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # The actions in the workflows, pinned to commit SHAs with the version in a comment. Dependabot
+  # updates both; all action updates of a week come as one pull request.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # New releases wait a week before Dependabot proposes them.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
+
+  # The package's dependencies. Updates within the constraints change composer.lock and come as
+  # one pull request a week; a new major widens the constraint in composer.json in a pull request
+  # of its own.
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      composer:
+        patterns: ['*']
+        update-types: [minor, patch]
