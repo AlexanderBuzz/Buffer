@@ -1,0 +1,10 @@
+# Excluded from the Composer package (git archive)
+
+.github/ export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+composer.lock export-ignore
+docs/ export-ignore
+tests/ export-ignore
+phpunit.xml export-ignore
+psalm.xml export-ignore

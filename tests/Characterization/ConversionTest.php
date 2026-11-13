@@ -61,7 +61,7 @@ final class ConversionTest extends TestCase
 
     public function testToUtf8ReturnsRawBytesWithoutDecoding(): void
     {
-        // Deliberate deviation: this is effectively toBinaryString(). Node would
+        // Deliberate deviation: this is the same as toBinaryString(). Node would
         // replace invalid sequences with U+FFFD. See README.
         $raw = Buffer::from('80FF', 'hex')->toUtf8();
 
@@ -84,6 +84,23 @@ final class ConversionTest extends TestCase
             '115792089237316195423570985008687907853269984665640564039457584007913129639935',
             Buffer::from(str_repeat('FF', 32), 'hex')->toDecimalString()
         );
+    }
+
+    public function testToDecimalStringOfAnEmptyBufferIsZero(): void
+    {
+        // Matches toInt(), which has always returned 0 here. It used to throw
+        // brick/math's NumberFormatException for the empty number.
+        $this->assertSame('0', Buffer::alloc(0)->toDecimalString());
+        $this->assertSame('0', Buffer::from('', 'hex')->toDecimalString());
+    }
+
+    public function testToBinaryStringReturnsTheRawBytes(): void
+    {
+        $buf = Buffer::from('80FF00', 'hex');
+
+        $this->assertSame("\x80\xFF\x00", $buf->toBinaryString());
+        $this->assertSame($buf->toUtf8(), $buf->toBinaryString());
+        $this->assertSame('', Buffer::alloc(0)->toBinaryString());
     }
 
     public function testDebug(): void

@@ -71,9 +71,11 @@ $out = Buffer::alloc(8);
 $out->writeBigUInt64BE('100000000');
 ```
 
-`toInt()` is limited to 8 bytes and throws `OverflowException` beyond that,
-rather than silently returning `PHP_INT_MAX`. Use `toDecimalString()` or the
-`Big*` family for wider values.
+`toInt()` reads the buffer as an unsigned big-endian integer and throws
+`OverflowException` when the value does not fit a PHP `int` - beyond 8 bytes,
+or from `0x8000000000000000` within 8 - rather than silently returning
+`PHP_INT_MAX`. Use `toDecimalString()` or the `Big*` family for those values.
+An empty buffer is `0` and `"0"`.
 
 ## Differences from Node.js
 
@@ -102,7 +104,8 @@ Convenient for binary protocol work, and the reason it is this way, but it means
 encoding explicitly if it matters.
 
 **`toUtf8()` does not decode UTF-8; it returns raw bytes.**
-It is effectively `toBinaryString()`: one `chr()` per byte, no validation. Node
+It is the same as `toBinaryString()`, the name that says what it does: one
+byte per character, no validation. Node
 replaces invalid sequences with U+FFFD. For well-formed UTF-8 the two agree; for
 arbitrary binary they do not. Use it to get at the bytes, not to validate them.
 
