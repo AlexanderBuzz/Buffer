@@ -3,6 +3,16 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `brick/math` 0.15 to 0.20 are allowed. The constraint listed one caret range
+  per minor and skipped them, although 1.0.0 is unchanged from 0.20.0 and the
+  methods the library calls did not change in between. A project holding one
+  of these versions could not install the package. The test suite passes on
+  every allowed minor from 0.11 to 1.0.
+
 ## [2.1.0] - 2026-11-13
 
 ### Added
